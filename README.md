@@ -17,10 +17,8 @@ workloads where speed and precision are critical.
 - Customizable **border modes** for signal padding
 
 ```rust
-use osclet::{make_daubechies_f64, DaubechiesFamily, BorderMode, DwtExecutor};
-
 let signal: Vec<f64> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-let dwt_executor = make_daubechies_f64(DaubechiesFamily::Db4, BorderMode::Wrap);
+let dwt_executor = Osclet::make_daubechies_f64(DaubechiesFamily::Db4, BorderMode::Wrap);
 
 let dwt = dwt_executor.dwt(&signal, 1).unwrap();
 println!("Approximation coefficients: {:?}", dwt.approx);

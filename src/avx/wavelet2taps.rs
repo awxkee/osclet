@@ -26,7 +26,7 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use crate::avx::util::shuffle;
+use crate::avx::util::{_mm_hsum_ps, _mm256_hpadd2_ps, shuffle};
 use crate::err::OscletError;
 use crate::filter_padding::make_arena_1d;
 use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr};
@@ -379,15 +379,8 @@ impl DwtForwardExecutor<f32> for AvxWavelet2TapsF32 {
                 let a0 = _mm256_mul_ps(xw0, l0);
                 let d0 = _mm256_mul_ps(xw0, h0);
 
-                let mut wa = _mm256_hadd_ps(a0, a0);
-                let mut wd = _mm256_hadd_ps(d0, d0);
-
-                wa = _mm256_castpd_ps(_mm256_permute4x64_pd::<{ shuffle(3, 1, 2, 0) }>(
-                    _mm256_castps_pd(wa),
-                ));
-                wd = _mm256_castpd_ps(_mm256_permute4x64_pd::<{ shuffle(3, 1, 2, 0) }>(
-                    _mm256_castps_pd(wd),
-                ));
+                let wa = _mm256_hpadd2_ps(a0, a0);
+                let wd = _mm256_hpadd2_ps(d0, d0);
 
                 _mm_storeu_ps(approx.as_mut_ptr(), _mm256_castps256_ps128(wa));
                 _mm_storeu_ps(detail.as_mut_ptr(), _mm256_castps256_ps128(wd));
@@ -409,8 +402,8 @@ impl DwtForwardExecutor<f32> for AvxWavelet2TapsF32 {
                 let wa = _mm_mul_ps(xw, _mm256_castps256_ps128(l0));
                 let wd = _mm_mul_ps(xw, _mm256_castps256_ps128(h0));
 
-                let a = _mm_hadd_ps(wa, wa);
-                let d = _mm_hadd_ps(wd, wd);
+                let a = _mm_hsum_ps(wa);
+                let d = _mm_hsum_ps(wd);
 
                 _mm_store_ss(approx as *mut f32, a);
                 _mm_store_ss(detail as *mut f32, d);

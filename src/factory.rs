@@ -28,6 +28,12 @@
  */
 use crate::{BorderMode, IncompleteDwtExecutor};
 
+#[inline]
+#[cfg(all(target_arch = "x86_64", feature = "avx"))]
+fn has_valid_avx() -> bool {
+    std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma")
+}
+
 pub(crate) trait DwtFactory<T> {
     fn wavelet_2_taps(
         border_mode: BorderMode,
@@ -60,6 +66,13 @@ impl DwtFactory<f32> for f32 {
         {
             use crate::neon::NeonWavelet2TapsF32;
             Box::new(NeonWavelet2TapsF32::new(border_mode, dwt))
+        }
+        #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+        {
+            if has_valid_avx() {
+                use crate::avx::AvxWavelet2TapsF32;
+                return Box::new(AvxWavelet2TapsF32::new(border_mode, dwt));
+            }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
@@ -126,6 +139,13 @@ impl DwtFactory<f64> for f64 {
         {
             use crate::neon::NeonWavelet2TapsF64;
             Box::new(NeonWavelet2TapsF64::new(border_mode, dwt))
+        }
+        #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+        {
+            if has_valid_avx() {
+                use crate::avx::AvxWavelet2TapsF64;
+                return Box::new(AvxWavelet2TapsF64::new(border_mode, dwt));
+            }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {

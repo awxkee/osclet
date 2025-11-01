@@ -1,5 +1,5 @@
 /*
- * // Copyright (c) Radzivon Bartoshyk 10/2025. All rights reserved.
+ * // Copyright (c) Radzivon Bartoshyk 11/2025. All rights reserved.
  * //
  * // Redistribution and use in source and binary forms, with or without modification,
  * // are permitted provided that the following conditions are met:
@@ -26,31 +26,44 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+use crate::avx::util::shuffle;
 use crate::err::OscletError;
 use crate::filter_padding::make_arena_1d;
-use crate::mla::fmla;
 use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr};
 use crate::{BorderMode, DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor};
-use std::arch::aarch64::*;
+use std::arch::x86_64::*;
 
-pub(crate) struct NeonWavelet2TapsF64 {
+pub(crate) struct AvxWavelet2TapsF64 {
     border_mode: BorderMode,
-    low_pass: [f64; 2],
-    high_pass: [f64; 2],
+    low_pass: [f64; 4],
+    high_pass: [f64; 4],
 }
 
-impl NeonWavelet2TapsF64 {
+impl AvxWavelet2TapsF64 {
     pub fn new(border_mode: BorderMode, wavelet: &[f64; 2]) -> Self {
+        let g = low_pass_to_high_from_arr(wavelet);
         Self {
             border_mode,
-            low_pass: *wavelet,
-            high_pass: low_pass_to_high_from_arr(wavelet),
+            low_pass: [wavelet[0], wavelet[1], wavelet[0], wavelet[1]],
+            high_pass: [g[0], g[1], g[0], g[1]],
         }
     }
 }
 
-impl DwtForwardExecutor<f64> for NeonWavelet2TapsF64 {
+impl DwtForwardExecutor<f64> for AvxWavelet2TapsF64 {
     fn execute_forward(
+        &self,
+        input: &[f64],
+        approx: &mut [f64],
+        details: &mut [f64],
+    ) -> Result<(), OscletError> {
+        unsafe { self.execute_forward_impl(input, approx, details) }
+    }
+}
+
+impl AvxWavelet2TapsF64 {
+    #[target_feature(enable = "avx2", enable = "fma")]
+    fn execute_forward_impl(
         &self,
         input: &[f64],
         approx: &mut [f64],
@@ -77,8 +90,8 @@ impl DwtForwardExecutor<f64> for NeonWavelet2TapsF64 {
         )?;
 
         unsafe {
-            let l0 = vld1q_f64(self.low_pass.as_ptr());
-            let h0 = vld1q_f64(self.high_pass.as_ptr());
+            let l0 = _mm256_loadu_pd(self.low_pass.as_ptr());
+            let h0 = _mm256_loadu_pd(self.high_pass.as_ptr());
 
             for (i, (approx, detail)) in approx
                 .chunks_exact_mut(2)
@@ -88,19 +101,20 @@ impl DwtForwardExecutor<f64> for NeonWavelet2TapsF64 {
                 let base0 = 2 * 2 * i;
 
                 let input0 = padded_input.get_unchecked(base0..);
-                let input1 = padded_input.get_unchecked(base0 + 2..);
 
-                let xw0 = vld1q_f64(input0.as_ptr());
-                let xw1 = vld1q_f64(input1.as_ptr());
+                let xw0 = _mm256_loadu_pd(input0.as_ptr());
 
-                let a0 = vmulq_f64(xw0, l0);
-                let d0 = vmulq_f64(xw0, h0);
+                let a0 = _mm256_mul_pd(xw0, l0);
+                let d0 = _mm256_mul_pd(xw0, h0);
 
-                let a1 = vmulq_f64(xw1, l0);
-                let d1 = vmulq_f64(xw1, h0);
+                let wa = _mm256_hadd_pd(a0, a0);
+                let wd = _mm256_hadd_pd(d0, d0);
 
-                vst1q_f64(approx.as_mut_ptr(), vpaddq_f64(a0, a1));
-                vst1q_f64(detail.as_mut_ptr(), vpaddq_f64(d0, d1));
+                let wa0 = _mm256_permute4x64_pd::<{ shuffle(3, 1, 2, 0) }>(wa);
+                let wd0 = _mm256_permute4x64_pd::<{ shuffle(3, 1, 2, 0) }>(wd);
+
+                _mm_storeu_pd(approx.as_mut_ptr(), _mm256_castpd256_pd128(wa0));
+                _mm_storeu_pd(detail.as_mut_ptr(), _mm256_castpd256_pd128(wd0));
             }
 
             let processed = 2 * approx.chunks_exact_mut(2).len() * 2;
@@ -113,21 +127,35 @@ impl DwtForwardExecutor<f64> for NeonWavelet2TapsF64 {
 
                 let input = padded_input.get_unchecked(base..);
 
-                let xw = vld1q_f64(input.as_ptr());
+                let xw = _mm_loadu_pd(input.as_ptr());
 
-                let a = vpaddd_f64(vmulq_f64(xw, l0));
-                let d = vpaddd_f64(vmulq_f64(xw, h0));
+                let wa = _mm_mul_pd(xw, _mm256_castpd256_pd128(l0));
+                let wd = _mm_mul_pd(xw, _mm256_castpd256_pd128(h0));
 
-                *approx = a;
-                *detail = d;
+                let a = _mm_hadd_pd(wa, wa);
+                let d = _mm_hadd_pd(wd, wd);
+
+                _mm_storel_pd(approx as *mut f64, a);
+                _mm_storel_pd(detail as *mut f64, d);
             }
         }
         Ok(())
     }
 }
-
-impl DwtInverseExecutor<f64> for NeonWavelet2TapsF64 {
+impl DwtInverseExecutor<f64> for AvxWavelet2TapsF64 {
     fn execute_inverse(
+        &self,
+        approx: &[f64],
+        details: &[f64],
+        output: &mut [f64],
+    ) -> Result<(), OscletError> {
+        unsafe { self.execute_inverse_impl(approx, details, output) }
+    }
+}
+
+impl AvxWavelet2TapsF64 {
+    #[target_feature(enable = "avx2", enable = "fma")]
+    fn execute_inverse_impl(
         &self,
         approx: &[f64],
         details: &[f64],
@@ -154,63 +182,82 @@ impl DwtInverseExecutor<f64> for NeonWavelet2TapsF64 {
             // 2*x - off + len >= output.len()
             // x >= (output.len() + off - len)/2
             let safe_end = ((output.len() + FILTER_OFFSET).saturating_sub(FILTER_LENGTH)) / 2;
+
             for i in 0..safe_start.min(safe_end) {
-                let (h, g) = (*approx.get_unchecked(i), *details.get_unchecked(i));
+                let (h, g) = (
+                    _mm_set1_pd(*approx.get_unchecked(i)),
+                    _mm_set1_pd(*details.get_unchecked(i)),
+                );
                 let k = 2 * i as isize - FILTER_OFFSET as isize;
                 for j in 0..2 {
                     let k = k + j as isize;
                     if k >= 0 && k < rec_len as isize {
-                        *output.get_unchecked_mut(k as usize) = fmla(
-                            self.low_pass[j],
-                            h,
-                            fmla(self.high_pass[j], g, *output.get_unchecked(k as usize)),
+                        let mut w = _mm_fmadd_sd(
+                            _mm_set1_pd(self.high_pass[j]),
+                            g,
+                            _mm_load_sd(output.get_unchecked(k as usize) as *const f64),
                         );
+                        w = _mm_fmadd_sd(_mm_set1_pd(self.low_pass[j]), h, w);
+                        _mm_store_sd(output.get_unchecked_mut(k as usize) as *mut f64, w);
                     }
                 }
             }
 
-            let l0 = vld1q_f64(self.low_pass.as_ptr());
-            let h0 = vld1q_f64(self.high_pass.as_ptr());
+            let l0 = _mm256_loadu_pd(self.low_pass.as_ptr());
+            let h0 = _mm256_loadu_pd(self.high_pass.as_ptr());
 
             let mut uq = safe_start;
 
             while uq + 2 < safe_end {
                 let (h, g) = (
-                    vld1q_f64(approx.get_unchecked(uq..).as_ptr()),
-                    vld1q_f64(details.get_unchecked(uq..).as_ptr()),
+                    _mm_loadu_pd(approx.get_unchecked(uq..).as_ptr()),
+                    _mm_loadu_pd(details.get_unchecked(uq..).as_ptr()),
                 );
                 let k0 = 2 * uq as isize - FILTER_OFFSET as isize;
                 let part0_src = output.get_unchecked(k0 as usize..);
-                let part1_src = output.get_unchecked(k0 as usize + 2..);
-                let xw0 = vld1q_f64(part0_src.as_ptr());
-                let xw1 = vld1q_f64(part1_src.as_ptr());
-                let q0 = vfmaq_laneq_f64::<0>(vfmaq_laneq_f64::<0>(xw0, h0, g), l0, h);
-                let q1 = vfmaq_laneq_f64::<1>(vfmaq_laneq_f64::<1>(xw1, h0, g), l0, h);
-                vst1q_f64(output.get_unchecked_mut(k0 as usize..).as_mut_ptr(), q0);
-                vst1q_f64(output.get_unchecked_mut(k0 as usize + 2..).as_mut_ptr(), q1);
+                let xw01 = _mm256_loadu_pd(part0_src.as_ptr());
+
+                let wh0 = _mm256_permute4x64_pd::<{ shuffle(1, 1, 0, 0) }>(_mm256_set_m128d(h, h));
+                let wg0 = _mm256_permute4x64_pd::<{ shuffle(1, 1, 0, 0) }>(_mm256_set_m128d(g, g));
+
+                let q0 = _mm256_fmadd_pd(l0, wh0, _mm256_fmadd_pd(wg0, h0, xw01));
+
+                _mm256_storeu_pd(output.get_unchecked_mut(k0 as usize..).as_mut_ptr(), q0);
                 uq += 2;
             }
 
             for i in uq..safe_end {
-                let (h, g) = (*approx.get_unchecked(i), *details.get_unchecked(i));
+                let (h, g) = (
+                    _mm_set1_pd(*approx.get_unchecked(i)),
+                    _mm_set1_pd(*details.get_unchecked(i)),
+                );
                 let k = 2 * i as isize - FILTER_OFFSET as isize;
                 let part = output.get_unchecked_mut(k as usize..);
-                let xw = vld1q_f64(part.as_ptr());
-                let q = vfmaq_n_f64(vfmaq_n_f64(xw, h0, g), l0, h);
-                vst1q_f64(part.as_mut_ptr(), q);
+                let xw = _mm_loadu_pd(part.as_ptr());
+                let q = _mm_fmadd_pd(
+                    _mm256_castpd256_pd128(l0),
+                    h,
+                    _mm_fmadd_pd(_mm256_castpd256_pd128(h0), g, xw),
+                );
+                _mm_storeu_pd(part.as_mut_ptr(), q);
             }
 
             for i in safe_end..approx.len() {
-                let (h, g) = (*approx.get_unchecked(i), *details.get_unchecked(i));
+                let (h, g) = (
+                    _mm_set1_pd(*approx.get_unchecked(i)),
+                    _mm_set1_pd(*details.get_unchecked(i)),
+                );
                 let k = 2 * i as isize - FILTER_OFFSET as isize;
                 for j in 0..2 {
                     let k = k + j as isize;
                     if k >= 0 && k < rec_len as isize {
-                        *output.get_unchecked_mut(k as usize) = fmla(
-                            self.low_pass[j],
-                            h,
-                            fmla(self.high_pass[j], g, *output.get_unchecked(k as usize)),
+                        let mut w = _mm_fmadd_sd(
+                            _mm_set1_pd(self.high_pass[j]),
+                            g,
+                            _mm_load_sd(output.get_unchecked(k as usize) as *const f64),
                         );
+                        w = _mm_fmadd_sd(_mm_set1_pd(self.low_pass[j]), h, w);
+                        _mm_store_sd(output.get_unchecked_mut(k as usize) as *mut f64, w);
                     }
                 }
             }
@@ -219,30 +266,33 @@ impl DwtInverseExecutor<f64> for NeonWavelet2TapsF64 {
     }
 }
 
-impl IncompleteDwtExecutor<f64> for NeonWavelet2TapsF64 {
+impl IncompleteDwtExecutor<f64> for AvxWavelet2TapsF64 {
     fn filter_length(&self) -> usize {
         2
     }
 }
 
-pub(crate) struct NeonWavelet2TapsF32 {
+pub(crate) struct AvxWavelet2TapsF32 {
     border_mode: BorderMode,
-    low_pass: [f32; 4],
-    high_pass: [f32; 4],
+    low_pass: [f32; 8],
+    high_pass: [f32; 8],
 }
 
-impl NeonWavelet2TapsF32 {
+impl AvxWavelet2TapsF32 {
     pub fn new(border_mode: BorderMode, wavelet: &[f32; 2]) -> Self {
         let k = low_pass_to_high_from_arr(wavelet);
         Self {
             border_mode,
-            low_pass: [wavelet[0], wavelet[1], wavelet[0], wavelet[1]],
-            high_pass: [k[0], k[1], k[0], k[1]],
+            low_pass: [
+                wavelet[0], wavelet[1], wavelet[0], wavelet[1], wavelet[0], wavelet[1], wavelet[0],
+                wavelet[1],
+            ],
+            high_pass: [k[0], k[1], k[0], k[1], k[0], k[1], k[0], k[1]],
         }
     }
 }
 
-impl DwtForwardExecutor<f32> for NeonWavelet2TapsF32 {
+impl DwtForwardExecutor<f32> for AvxWavelet2TapsF32 {
     fn execute_forward(
         &self,
         input: &[f32],
@@ -270,8 +320,8 @@ impl DwtForwardExecutor<f32> for NeonWavelet2TapsF32 {
         )?;
 
         unsafe {
-            let l0 = vld1q_f32(self.low_pass.as_ptr());
-            let h0 = vld1q_f32(self.high_pass.as_ptr());
+            let l0 = _mm256_loadu_ps(self.low_pass.as_ptr());
+            let h0 = _mm256_loadu_ps(self.high_pass.as_ptr());
 
             let mut processed = 0usize;
 
@@ -284,39 +334,34 @@ impl DwtForwardExecutor<f32> for NeonWavelet2TapsF32 {
 
                 let input0 = padded_input.get_unchecked(base0..);
 
-                let xw0 = vld1q_f32(input0.as_ptr());
-                let xw1 = vld1q_f32(input0.get_unchecked(4..).as_ptr());
-                let xw2 = vld1q_f32(input0.get_unchecked(8..).as_ptr());
-                let xw3 = vld1q_f32(input0.get_unchecked(12..).as_ptr());
+                let xw0 = _mm256_loadu_ps(input0.as_ptr());
+                let xw2 = _mm256_loadu_ps(input0.get_unchecked(8..).as_ptr());
 
-                let a0 = vmulq_f32(xw0, l0);
-                let d0 = vmulq_f32(xw0, h0);
+                let a0 = _mm256_mul_ps(xw0, l0);
+                let d0 = _mm256_mul_ps(xw0, h0);
 
-                let a1 = vmulq_f32(xw1, l0);
-                let d1 = vmulq_f32(xw1, h0);
+                let a2 = _mm256_mul_ps(xw2, l0);
+                let d2 = _mm256_mul_ps(xw2, h0);
 
-                let a2 = vmulq_f32(xw2, l0);
-                let d2 = vmulq_f32(xw2, h0);
+                let mut wa = _mm256_hadd_ps(a0, a2);
+                let mut wd = _mm256_hadd_ps(d0, d2);
 
-                let a3 = vmulq_f32(xw3, l0);
-                let d3 = vmulq_f32(xw3, h0);
+                wa = _mm256_castpd_ps(_mm256_permute4x64_pd::<{ shuffle(3, 1, 2, 0) }>(
+                    _mm256_castps_pd(wa),
+                ));
+                wd = _mm256_castpd_ps(_mm256_permute4x64_pd::<{ shuffle(3, 1, 2, 0) }>(
+                    _mm256_castps_pd(wd),
+                ));
 
-                vst1q_f32(approx.as_mut_ptr(), vpaddq_f32(a0, a1));
-                vst1q_f32(detail.as_mut_ptr(), vpaddq_f32(d0, d1));
-                vst1q_f32(
-                    approx.get_unchecked_mut(4..).as_mut_ptr(),
-                    vpaddq_f32(a2, a3),
-                );
-                vst1q_f32(
-                    detail.get_unchecked_mut(4..).as_mut_ptr(),
-                    vpaddq_f32(d2, d3),
-                );
+                _mm256_storeu_ps(approx.as_mut_ptr(), wa);
+                _mm256_storeu_ps(detail.as_mut_ptr(), wd);
 
                 processed += 8;
             }
 
             let approx = approx.chunks_exact_mut(8).into_remainder();
             let details = details.chunks_exact_mut(8).into_remainder();
+
             let padded_input = padded_input.get_unchecked(processed * 2..);
             processed = 0;
 
@@ -328,19 +373,24 @@ impl DwtForwardExecutor<f32> for NeonWavelet2TapsF32 {
                 let base0 = 2 * 4 * i;
 
                 let input0 = padded_input.get_unchecked(base0..);
-                let input1 = padded_input.get_unchecked(base0 + 4..);
 
-                let xw0 = vld1q_f32(input0.as_ptr());
-                let xw1 = vld1q_f32(input1.as_ptr());
+                let xw0 = _mm256_loadu_ps(input0.as_ptr());
 
-                let a0 = vmulq_f32(xw0, l0);
-                let d0 = vmulq_f32(xw0, h0);
+                let a0 = _mm256_mul_ps(xw0, l0);
+                let d0 = _mm256_mul_ps(xw0, h0);
 
-                let a1 = vmulq_f32(xw1, l0);
-                let d1 = vmulq_f32(xw1, h0);
+                let mut wa = _mm256_hadd_ps(a0, a0);
+                let mut wd = _mm256_hadd_ps(d0, d0);
 
-                vst1q_f32(approx.as_mut_ptr(), vpaddq_f32(a0, a1));
-                vst1q_f32(detail.as_mut_ptr(), vpaddq_f32(d0, d1));
+                wa = _mm256_castpd_ps(_mm256_permute4x64_pd::<{ shuffle(3, 1, 2, 0) }>(
+                    _mm256_castps_pd(wa),
+                ));
+                wd = _mm256_castpd_ps(_mm256_permute4x64_pd::<{ shuffle(3, 1, 2, 0) }>(
+                    _mm256_castps_pd(wd),
+                ));
+
+                _mm_storeu_ps(approx.as_mut_ptr(), _mm256_castps256_ps128(wa));
+                _mm_storeu_ps(detail.as_mut_ptr(), _mm256_castps256_ps128(wd));
 
                 processed += 4;
             }
@@ -350,24 +400,27 @@ impl DwtForwardExecutor<f32> for NeonWavelet2TapsF32 {
             let padded_input = padded_input.get_unchecked(processed * 2..);
 
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
-                let base = 2 * (processed + i);
+                let base = 2 * i;
 
                 let input = padded_input.get_unchecked(base..);
 
-                let xw = vld1_f32(input.as_ptr());
+                let xw = _mm_castsi128_ps(_mm_loadu_si64(input.as_ptr().cast()));
 
-                let a = vpadds_f32(vmul_f32(xw, vget_low_f32(l0)));
-                let d = vpadds_f32(vmul_f32(xw, vget_low_f32(h0)));
+                let wa = _mm_mul_ps(xw, _mm256_castps256_ps128(l0));
+                let wd = _mm_mul_ps(xw, _mm256_castps256_ps128(h0));
 
-                *approx = a;
-                *detail = d;
+                let a = _mm_hadd_ps(wa, wa);
+                let d = _mm_hadd_ps(wd, wd);
+
+                _mm_store_ss(approx as *mut f32, a);
+                _mm_store_ss(detail as *mut f32, d);
             }
         }
         Ok(())
     }
 }
 
-impl DwtInverseExecutor<f32> for NeonWavelet2TapsF32 {
+impl DwtInverseExecutor<f32> for AvxWavelet2TapsF32 {
     fn execute_inverse(
         &self,
         approx: &[f32],
@@ -396,64 +449,81 @@ impl DwtInverseExecutor<f32> for NeonWavelet2TapsF32 {
             // x >= (output.len() + off - len)/2
             let safe_end = ((output.len() + FILTER_OFFSET).saturating_sub(FILTER_LENGTH)) / 2;
             for i in 0..safe_start.min(safe_end) {
-                let (h, g) = (*approx.get_unchecked(i), *details.get_unchecked(i));
+                let (h, g) = (
+                    _mm_set_ss(*approx.get_unchecked(i)),
+                    _mm_set_ss(*details.get_unchecked(i)),
+                );
                 let k = 2 * i as isize - FILTER_OFFSET as isize;
                 for j in 0..2 {
                     let k = k + j as isize;
                     if k >= 0 && k < rec_len as isize {
-                        *output.get_unchecked_mut(k as usize) = fmla(
-                            self.low_pass[j],
-                            h,
-                            fmla(self.high_pass[j], g, *output.get_unchecked(k as usize)),
+                        let mut w = _mm_fmadd_ss(
+                            _mm_set1_ps(self.high_pass[j]),
+                            g,
+                            _mm_load_ss(output.get_unchecked(k as usize) as *const f32),
                         );
+                        w = _mm_fmadd_ss(_mm_set1_ps(self.low_pass[j]), h, w);
+                        _mm_store_ss(output.get_unchecked_mut(k as usize) as *mut f32, w);
                     }
                 }
             }
 
-            let l0 = vld1q_f32(self.low_pass.as_ptr());
-            let h0 = vld1q_f32(self.high_pass.as_ptr());
+            let l0 = _mm256_loadu_ps(self.low_pass.as_ptr());
+            let h0 = _mm256_loadu_ps(self.high_pass.as_ptr());
 
             let mut uq = safe_start;
-            static SH: [u8; 16] = [0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 4, 5, 6, 7];
-            let sh = vld1q_u8(SH.as_ptr());
 
             while uq + 2 < safe_end {
                 let (h, g) = (
-                    vld1_f32(approx.get_unchecked(uq..).as_ptr()),
-                    vld1_f32(details.get_unchecked(uq..).as_ptr()),
+                    _mm_castsi128_ps(_mm_loadu_si64(approx.get_unchecked(uq..).as_ptr().cast())),
+                    _mm_castsi128_ps(_mm_loadu_si64(details.get_unchecked(uq..).as_ptr().cast())),
                 );
-                let fh =
-                    vreinterpretq_f32_u8(vqtbl1q_u8(vreinterpretq_u8_f32(vcombine_f32(h, h)), sh));
-                let fg =
-                    vreinterpretq_f32_u8(vqtbl1q_u8(vreinterpretq_u8_f32(vcombine_f32(g, g)), sh));
+                let fh = _mm_permute_ps::<{ shuffle(1, 1, 0, 0) }>(h);
+                let fg = _mm_permute_ps::<{ shuffle(1, 1, 0, 0) }>(g);
                 let k0 = 2 * uq as isize - FILTER_OFFSET as isize;
                 let part0_src = output.get_unchecked(k0 as usize..);
-                let xw0 = vld1q_f32(part0_src.as_ptr());
-                let q0 = vfmaq_f32(vfmaq_f32(xw0, h0, fg), l0, fh);
-                vst1q_f32(output.get_unchecked_mut(k0 as usize..).as_mut_ptr(), q0);
+                let xw0 = _mm_loadu_ps(part0_src.as_ptr());
+                let q0 = _mm_fmadd_ps(
+                    _mm256_castps256_ps128(l0),
+                    fh,
+                    _mm_fmadd_ps(_mm256_castps256_ps128(h0), fg, xw0),
+                );
+                _mm_storeu_ps(output.get_unchecked_mut(k0 as usize..).as_mut_ptr(), q0);
                 uq += 2;
             }
 
             for i in uq..safe_end {
-                let (h, g) = (*approx.get_unchecked(i), *details.get_unchecked(i));
+                let (h, g) = (
+                    _mm_set1_ps(*approx.get_unchecked(i)),
+                    _mm_set1_ps(*details.get_unchecked(i)),
+                );
                 let k = 2 * i as isize - FILTER_OFFSET as isize;
                 let part = output.get_unchecked_mut(k as usize..);
-                let xw = vld1_f32(part.as_ptr());
-                let q = vfma_n_f32(vfma_n_f32(xw, vget_low_f32(h0), g), vget_low_f32(l0), h);
-                vst1_f32(part.as_mut_ptr(), q);
+                let xw = _mm_castsi128_ps(_mm_loadu_si64(part.as_ptr().cast()));
+                let q = _mm_fmadd_ps(
+                    _mm256_castps256_ps128(l0),
+                    h,
+                    _mm_fmadd_ps(_mm256_castps256_ps128(h0), g, xw),
+                );
+                _mm_storel_pd(part.as_mut_ptr().cast(), _mm_castps_pd(q));
             }
 
             for i in safe_end..approx.len() {
-                let (h, g) = (*approx.get_unchecked(i), *details.get_unchecked(i));
+                let (h, g) = (
+                    _mm_set_ss(*approx.get_unchecked(i)),
+                    _mm_set_ss(*details.get_unchecked(i)),
+                );
                 let k = 2 * i as isize - FILTER_OFFSET as isize;
                 for j in 0..2 {
                     let k = k + j as isize;
                     if k >= 0 && k < rec_len as isize {
-                        *output.get_unchecked_mut(k as usize) = fmla(
-                            self.low_pass[j],
-                            h,
-                            fmla(self.high_pass[j], g, *output.get_unchecked(k as usize)),
+                        let mut w = _mm_fmadd_ss(
+                            _mm_set1_ps(self.high_pass[j]),
+                            g,
+                            _mm_load_ss(output.get_unchecked(k as usize) as *const f32),
                         );
+                        w = _mm_fmadd_ss(_mm_set1_ps(self.low_pass[j]), h, w);
+                        _mm_store_ss(output.get_unchecked_mut(k as usize) as *mut f32, w);
                     }
                 }
             }
@@ -462,7 +532,7 @@ impl DwtInverseExecutor<f32> for NeonWavelet2TapsF32 {
     }
 }
 
-impl IncompleteDwtExecutor<f32> for NeonWavelet2TapsF32 {
+impl IncompleteDwtExecutor<f32> for AvxWavelet2TapsF32 {
     fn filter_length(&self) -> usize {
         2
     }
@@ -473,12 +543,19 @@ mod tests {
     use super::*;
     use crate::{DaubechiesFamily, WaveletFilterProvider};
 
+    fn has_avx_with_fma() -> bool {
+        std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma")
+    }
+
     #[test]
     fn test_db1_odd() {
+        if !has_avx_with_fma() {
+            return;
+        }
         let input = vec![
             1.0, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3, 2.5,
         ];
-        let db1 = NeonWavelet2TapsF64::new(
+        let db1 = AvxWavelet2TapsF64::new(
             BorderMode::Wrap,
             DaubechiesFamily::Db1
                 .get_wavelet()
@@ -533,9 +610,6 @@ mod tests {
             );
         });
 
-        println!("{:?}", approx);
-        println!("{:?}", details);
-
         let mut reconstructed = vec![
             0.0;
             if input.len() % 2 != 0 {
@@ -558,10 +632,13 @@ mod tests {
 
     #[test]
     fn test_db1_even() {
+        if !has_avx_with_fma() {
+            return;
+        }
         let input = vec![
             1.0, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3,
         ];
-        let db1 = NeonWavelet2TapsF64::new(
+        let db1 = AvxWavelet2TapsF64::new(
             BorderMode::Wrap,
             DaubechiesFamily::Db1
                 .get_wavelet()
@@ -574,8 +651,6 @@ mod tests {
         let mut details = vec![0.0; out_length];
         db1.execute_forward(&input, &mut approx, &mut details)
             .unwrap();
-        println!("approx {:?}", approx);
-        println!("approx {:?}", details);
 
         const REFERENCE_APPROX: [f64; 8] = [
             2.12132034, 4.94974747, 2.12132034, 0.70710678, 6.29325035, 6.22253967, 4.10121933,
@@ -624,10 +699,13 @@ mod tests {
 
     #[test]
     fn test_db1_odd_f32() {
+        if !has_avx_with_fma() {
+            return;
+        }
         let input = vec![
             1.0, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3, 2.5,
         ];
-        let db1 = NeonWavelet2TapsF32::new(
+        let db1 = AvxWavelet2TapsF32::new(
             BorderMode::Wrap,
             DaubechiesFamily::Db1
                 .get_wavelet()
@@ -681,9 +759,6 @@ mod tests {
             );
         });
 
-        println!("{:?}", approx);
-        println!("{:?}", details);
-
         let mut reconstructed = vec![
             0.0;
             if input.len() % 2 != 0 {
@@ -706,10 +781,13 @@ mod tests {
 
     #[test]
     fn test_db1_even_f32() {
+        if !has_avx_with_fma() {
+            return;
+        }
         let input = vec![
             1.0, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3,
         ];
-        let db1 = NeonWavelet2TapsF32::new(
+        let db1 = AvxWavelet2TapsF32::new(
             BorderMode::Wrap,
             DaubechiesFamily::Db1
                 .get_wavelet()
@@ -722,8 +800,6 @@ mod tests {
         let mut details = vec![0.0; out_length];
         db1.execute_forward(&input, &mut approx, &mut details)
             .unwrap();
-        println!("approx {:?}", approx);
-        println!("approx {:?}", details);
 
         const REFERENCE_APPROX: [f32; 8] = [
             2.12132034, 4.94974747, 2.12132034, 0.70710678, 6.29325035, 6.22253967, 4.10121933,
@@ -772,11 +848,14 @@ mod tests {
 
     #[test]
     fn test_db1_even_f32_2() {
+        if !has_avx_with_fma() {
+            return;
+        }
         let input = vec![
             1.0, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3, 2.0,
             1.0,
         ];
-        let db1 = NeonWavelet2TapsF32::new(
+        let db1 = AvxWavelet2TapsF32::new(
             BorderMode::Wrap,
             DaubechiesFamily::Db1
                 .get_wavelet()
@@ -789,8 +868,6 @@ mod tests {
         let mut details = vec![0.0; out_length];
         db1.execute_forward(&input, &mut approx, &mut details)
             .unwrap();
-        println!("approx {:?}", approx);
-        println!("approx {:?}", details);
 
         const REFERENCE_APPROX: [f32; 9] = [
             2.12132034, 4.94974747, 2.12132034, 0.70710678, 6.29325035, 6.22253967, 4.10121933,

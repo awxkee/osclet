@@ -138,8 +138,8 @@ where
             })
         } else {
             let mut current_signal = signal.to_vec();
-            let mut approx = vec![];
-            let mut details = vec![];
+            let mut approx;
+            let mut details;
 
             let filter_length = self.intercepted.filter_length();
 

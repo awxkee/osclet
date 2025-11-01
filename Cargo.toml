@@ -18,7 +18,8 @@ rust-version = "1.87.0"
 num-traits = "0.2.19"
 
 [features]
-default = ["neon"]
+default = ["neon", "avx"]
+avx = []
 neon = []
 
 [package.metadata.docs.rs]

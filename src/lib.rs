@@ -34,6 +34,8 @@ use num_traits::{AsPrimitive, MulAdd};
 use std::fmt::Debug;
 use std::ops::{Add, Mul, Neg};
 
+#[cfg(all(target_arch = "x86_64", feature = "avx"))]
+mod avx;
 mod border_mode;
 mod coiflet;
 mod completed;
@@ -44,6 +46,7 @@ mod factory;
 mod filter_padding;
 mod mla;
 mod modwt;
+#[cfg(all(target_arch = "aarch64", feature = "neon"))]
 mod neon;
 mod symlets;
 mod util;

@@ -28,6 +28,7 @@
  */
 use crate::cdf53f::define_dwt_cdf_float;
 use crate::err::{OscletError, try_vec};
+use crate::mla::fmla;
 use crate::{
     Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor, MultiDwt,
 };
@@ -39,6 +40,8 @@ const ALPHA: f64 = -1.5861343420693648;
 const BETA: f64 = -0.0529801185718856;
 const GAMMA: f64 = 0.8829110755411875;
 const DELTA: f64 = 0.4435068520511142;
+const K: f64 = 1.1496043988602418;
+const INV_K: f64 = 0.86986445162478079;
 
 #[derive(Default)]
 pub(crate) struct Cdf97<T> {
@@ -74,16 +77,14 @@ fn dwt97_forward_update_even<
     {
         let d_left = *detail;
         let d_right = *detail_next;
-        let update = (d_left + d_right) * c;
-        *dst = *dst + update;
+        *dst = fmla(d_left + d_right, c, *dst);
     }
 
     if approx.len() > 1 {
         let i = approx.len() - 1;
         let d_left = details[i - 1];
         let d_right = *details.last().unwrap();
-        let update = (d_left + d_right) * c;
-        approx[i] = approx[i] + update;
+        approx[i] = fmla(d_left + d_right, c, approx[i]);
     }
 }
 
@@ -108,8 +109,7 @@ fn dwt97_forward_update_odd<
         .zip(approx.iter())
         .zip(approx_next.iter())
     {
-        let update = (src_left + src_right) * c;
-        *dst = *dst + update;
+        *dst = fmla(src_left + src_right, c, *dst);
     }
 
     if approx.len() == details.len() {
@@ -117,8 +117,19 @@ fn dwt97_forward_update_odd<
         let src_left = approx[i - 1];
         // at boundary, mirror last sample
         let src_right = src_left;
-        let update = (src_left + src_right) * c;
-        details[i - 1] = details[i - 1] + update;
+        details[i - 1] = fmla(src_left + src_right, c, details[i - 1]);
+    }
+}
+
+fn dwt97_scale<T: Mul<T, Output = T>>(approx: &mut [T], details: &mut [T], k: T, inv_k: T)
+where
+    T: Copy + Mul<T, Output = T>,
+{
+    for x in approx.iter_mut() {
+        *x = *x * k;
+    }
+    for x in details.iter_mut() {
+        *x = *x * inv_k;
     }
 }
 
@@ -192,6 +203,8 @@ where
         // Update 2: even += delta * (odd_left + odd_right)
         dwt97_forward_update_even(approx, details, DELTA.as_());
 
+        dwt97_scale(approx, details, K.as_(), INV_K.as_());
+
         Ok(())
     }
 }
@@ -225,6 +238,8 @@ where
 
         let mut approx_inv = approx.to_vec();
         let mut detail_inv = details.to_vec();
+
+        dwt97_scale(&mut approx_inv, &mut detail_inv, INV_K.as_(), K.as_());
 
         // Inverse update 2: even -= delta * (odd_left + odd_right)
         dwt97_forward_update_even(&mut approx_inv, &mut detail_inv, (-DELTA).as_());

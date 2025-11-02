@@ -63,8 +63,7 @@ fn dwt97_forward_update_even<
 ) where
     f64: AsPrimitive<T>,
 {
-    let u = (details[0] + details[0]) * c;
-    approx[0] = approx[0] + u;
+    approx[0] = fmla(details[0] + details[0], c, approx[0]);
 
     let details_next = &details[1..];
     let approx_len = approx.len();
@@ -145,7 +144,7 @@ impl<
 where
     f64: AsPrimitive<T>,
 {
-    /// Perform the forward CDF 5/3 DWT (lifting scheme) on a 1D signal.
+    /// Perform the forward CDF 9/7 DWT (lifting scheme) on a 1D signal.
     /// Splits the signal into approximation (low-pass) and detail (high-pass) coefficients.
     fn execute_forward(
         &self,
@@ -168,7 +167,7 @@ where
         let signal_n2 = &input[2..];
 
         // First lifting step
-        details[0] = input[0] + (input[0] + input[1]) * ALPHA.as_();
+        details[0] = fmla(input[0] + input[1], ALPHA.as_(), input[0]);
 
         for (((dst, &s_previous), &s_current), &s_next) in details
             .iter_mut()
@@ -178,16 +177,14 @@ where
         {
             let left = s_previous;
             let right = s_next;
-            let predicted = (left + right) * ALPHA.as_();
-            *dst = s_current + predicted;
+            *dst = fmla(left + right, ALPHA.as_(), s_current);
         }
 
         // Handle last odd index if n is even (boundary)
         if n.is_multiple_of(2) {
             let i = n - 1;
             let left = input[i - 1];
-            let predicted = (left + left) * ALPHA.as_();
-            *details.last_mut().unwrap() = input[i] + predicted;
+            *details.last_mut().unwrap() = fmla(left + left, ALPHA.as_(), input[i]);
         }
 
         for (dst, src) in approx.iter_mut().zip(input.iter().step_by(2)) {
@@ -221,7 +218,7 @@ impl<
 where
     f64: AsPrimitive<T>,
 {
-    /// Perform the inverse CDF 5/3 DWT (lifting scheme) to reconstruct the original signal.
+    /// Perform the inverse CDF 9/7 DWT (lifting scheme) to reconstruct the original signal.
     fn execute_inverse(
         &self,
         approx: &[T],

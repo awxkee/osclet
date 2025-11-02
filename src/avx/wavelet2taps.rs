@@ -26,7 +26,7 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use crate::avx::util::{_mm_hsum_ps, _mm256_hpadd2_ps, shuffle};
+use crate::avx::util::{_mm_hsum_pd, _mm_hsum_ps, _mm256_hpadd2_ps, shuffle};
 use crate::err::OscletError;
 use crate::filter_padding::make_arena_1d;
 use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr};
@@ -132,8 +132,8 @@ impl AvxWavelet2TapsF64 {
                 let wa = _mm_mul_pd(xw, _mm256_castpd256_pd128(l0));
                 let wd = _mm_mul_pd(xw, _mm256_castpd256_pd128(h0));
 
-                let a = _mm_hadd_pd(wa, wa);
-                let d = _mm_hadd_pd(wd, wd);
+                let a = _mm_hsum_pd(wa);
+                let d = _mm_hsum_pd(wd);
 
                 _mm_storel_pd(approx as *mut f64, a);
                 _mm_storel_pd(detail as *mut f64, d);

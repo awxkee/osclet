@@ -347,7 +347,6 @@ mod tests {
         let mut reconstructed = vec![0.0; idwt_length(approx.len(), 6)];
         db3.execute_inverse(&approx, &details, &mut reconstructed)
             .unwrap();
-        println!("{:?}", reconstructed);
         reconstructed.iter().take(input.len()).enumerate().for_each(|(i, x)| {
             assert!(
                 (input[i] - x).abs() < 1e-7,

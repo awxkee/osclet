@@ -44,6 +44,24 @@ pub(crate) fn _mm_hsum_ps(v: __m128) -> __m128 {
     sums
 }
 
+#[inline]
+#[target_feature(enable = "sse2")]
+pub(crate) fn _mm_hsum_pd(v: __m128d) -> __m128d {
+    let undef = _mm_undefined_ps();
+    let shuftmp = _mm_movehl_ps(undef, _mm_castpd_ps(v));
+    let shuf = _mm_castps_pd(shuftmp);
+    _mm_add_sd(v, shuf)
+}
+
+#[inline]
+#[target_feature(enable = "avx")]
+pub(crate) fn _mm256_hsum_pd(v: __m256d) -> __m128d {
+    _mm_hsum_pd(_mm_add_pd(
+        _mm256_castpd256_pd128(v),
+        _mm256_extractf128_pd::<1>(v),
+    ))
+}
+
 // #[inline]
 // #[target_feature(enable = "avx2")]
 // pub(crate) fn _mm256_hpadd_ps(v: __m256) -> __m256 {
@@ -60,4 +78,11 @@ pub(crate) fn _mm256_hpadd2_ps(v0: __m256, v1: __m256) -> __m256 {
     _mm256_castpd_ps(_mm256_permute4x64_pd::<{ shuffle(3, 1, 2, 0) }>(
         _mm256_castps_pd(wa0),
     ))
+}
+
+#[inline]
+#[target_feature(enable = "avx2")]
+pub(crate) fn _mm256_hpadd2_pd(v0: __m256d, v1: __m256d) -> __m256d {
+    let wa0 = _mm256_hadd_pd(v0, v1);
+    _mm256_permute4x64_pd::<{ shuffle(3, 1, 2, 0) }>(wa0)
 }

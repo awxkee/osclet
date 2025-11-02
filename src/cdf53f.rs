@@ -332,8 +332,8 @@ macro_rules! define_dwt_cdf_float {
                     })
                 } else {
                     let mut current_signal = signal.to_vec();
-                    let mut approx = vec![];
-                    let mut details = vec![];
+                    let mut approx;
+                    let mut details;
 
                     let mut levels_store = Vec::with_capacity(levels);
 

@@ -120,10 +120,7 @@ fn dwt97_forward_update_odd<
     }
 }
 
-fn dwt97_scale<T: Mul<T, Output = T>>(approx: &mut [T], details: &mut [T], k: T, inv_k: T)
-where
-    T: Copy + Mul<T, Output = T>,
-{
+fn dwt97_scale<T: Mul<T, Output = T> + Copy>(approx: &mut [T], details: &mut [T], k: T, inv_k: T) {
     for x in approx.iter_mut() {
         *x = *x * k;
     }

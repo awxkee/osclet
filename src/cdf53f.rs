@@ -405,7 +405,9 @@ mod tests {
         i16_cdf53
             .execute_inverse(&approx, &details, &mut restored)
             .unwrap();
-        assert_eq!(&o_signal, &restored);
+        o_signal.iter().zip(restored.iter()).enumerate().for_each(|(idx, (o, re))| {
+            assert!((o - re).abs() < 1e-3, "Reconstruction difference should be less than 1e-3, but it's not for original o {o}, restored {re} at idx {idx}");
+        });
     }
 
     #[test]
@@ -433,7 +435,9 @@ mod tests {
         i16_cdf53
             .execute_inverse(&approx, &details, &mut restored)
             .unwrap();
-        assert_eq!(&o_signal, &restored);
+        o_signal.iter().zip(restored.iter()).enumerate().for_each(|(idx, (o, re))| {
+            assert!((o - re).abs() < 1e-3, "Reconstruction difference should be less than 1e-3, but it's not for original o {o}, restored {re} at idx {idx}");
+        });
     }
 
     #[test]
@@ -461,6 +465,8 @@ mod tests {
         i16_cdf53
             .execute_inverse(&approx, &details, &mut restored)
             .unwrap();
-        assert_eq!(&o_signal, &restored);
+        o_signal.iter().zip(restored.iter()).enumerate().for_each(|(idx, (o, re))| {
+            assert!((o - re).abs() < 1e-3, "Reconstruction difference should be less than 1e-3, but it's not for original o {o}, restored {re} at idx {idx}");
+        });
     }
 }

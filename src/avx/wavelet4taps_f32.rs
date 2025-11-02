@@ -26,7 +26,7 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use crate::avx::util::{_mm256_hpadd2_ps, _mm_hsum_ps, shuffle};
+use crate::avx::util::{_mm_hsum_ps, _mm256_hpadd2_ps, shuffle};
 use crate::border_mode::BorderMode;
 use crate::err::OscletError;
 use crate::filter_padding::make_arena_1d;

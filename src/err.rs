@@ -40,6 +40,8 @@ pub enum OscletError {
     ZeroOrOddSizedWavelet,
     MisconfiguredFilterCenter(usize, usize),
     BufferWasTooSmallForLevel,
+    ApproxSizeNotMatches(usize, usize),
+    DetailsSizeNotMatches(usize, usize),
 }
 
 impl Error for OscletError {}
@@ -79,6 +81,12 @@ impl std::fmt::Display for OscletError {
             }
             OscletError::BufferWasTooSmallForLevel => {
                 f.write_fmt(format_args!("Buffer was too small for provided level"))
+            }
+            OscletError::ApproxSizeNotMatches(current_size, required_size) => {
+                f.write_fmt(format_args!("Approximate size {current_size} does not match required size {required_size}"))
+            }
+            OscletError::DetailsSizeNotMatches(current_size, required_size) => {
+                f.write_fmt(format_args!("Details size {current_size} does not match required size {required_size}"))
             }
         }
     }

@@ -99,10 +99,10 @@ where
             let filter_length = self.intercepted.filter_length();
 
             for _ in 0..level {
-                if filter_length > signal.len() {
+                if filter_length > current_signal.len() {
                     return Err(OscletError::BufferWasTooSmallForLevel);
                 }
-                let approx_length = dwt_length(signal.len(), filter_length);
+                let approx_length = dwt_length(current_signal.len(), filter_length);
 
                 approx = try_vec![T::default(); approx_length];
                 details = try_vec![T::default(); approx_length];

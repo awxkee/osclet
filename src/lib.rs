@@ -37,6 +37,9 @@ use std::ops::{Add, Mul, Neg};
 #[cfg(all(target_arch = "x86_64", feature = "avx"))]
 mod avx;
 mod border_mode;
+mod cdf53f;
+mod cdf53i;
+mod cdf97f;
 mod coiflet;
 mod completed;
 mod convolve1d;
@@ -56,6 +59,9 @@ mod wavelet6taps;
 mod wavelet8taps;
 mod wavelet_n_taps;
 
+use crate::cdf53f::Cdf53;
+use crate::cdf53i::Cdf53Integer;
+use crate::cdf97f::Cdf97;
 use crate::completed::CompletedDwtExecutor;
 use crate::convolve1d::ConvolveFactory;
 use crate::factory::DwtFactory;
@@ -472,5 +478,122 @@ impl Osclet {
         Ok(Box::new(CompletedDwtExecutor::new(
             Self::default_factory_dyn(border_mode, provider),
         )))
+    }
+
+    /// Creates a CDF 5/3 (LeGall 5/3) Discrete Wavelet Transform (DWT) executor
+    /// using integer lifting steps, specialized for 16-bit integer signals.
+    ///
+    /// # Description
+    ///
+    /// This implementation uses the **integer (reversible) lifting scheme** of the
+    /// Cohen–Daubechies–Feauveau 5/3 wavelet, commonly used in lossless JPEG 2000.
+    ///
+    /// The transform operates entirely in integer domain using reversible lifting
+    /// operations (shifts and additions only), so it does not introduce rounding
+    /// errors and can be perfectly inverted.
+    ///
+    /// Internally, intermediate computations use 32-bit integers to avoid overflow,
+    /// but the algorithm remains reversible for typical signal amplitudes.
+    ///
+    /// # Dynamic Range
+    ///
+    /// - For `i16` signals, the safe input range is approximately ±(1 << 14)
+    ///   to avoid intermediate overflow during lifting steps.
+    ///
+    /// Exceeding these ranges may cause temporary overflows in intermediate steps
+    /// but does not affect the transform’s reversibility if wrapped arithmetic
+    /// is acceptable (e.g., in modular integer contexts).
+    ///
+    /// # Returns
+    ///
+    /// A boxed [`DwtExecutor`] trait object implementing the CDF 5/3 integer
+    /// forward and inverse transform for `i16` samples.
+    pub fn make_cdf53_i16() -> Box<dyn DwtExecutor<i16> + Send + Sync> {
+        Box::new(Cdf53Integer::<i16, i32>::default())
+    }
+
+    /// Creates a CDF 5/3 (LeGall 5/3) Discrete Wavelet Transform (DWT) executor
+    /// using integer lifting steps, specialized for 32-bit integer signals.
+    ///
+    /// # Description
+    ///
+    /// This version is numerically identical to [`make_cdf53_i16()`] but operates
+    /// directly on 32-bit integers, allowing for higher dynamic range signals.
+    ///
+    /// # Dynamic Range
+    ///
+    /// - Safe for amplitudes up to approximately ±(1 << 30)
+    ///   before intermediate additions risk exceeding `i32` limits.
+    /// - Perfectly reversible within this range, with no rounding errors.
+    ///
+    /// # Returns
+    ///
+    /// A boxed [`DwtExecutor`] trait object implementing the CDF 5/3 integer
+    /// forward and inverse transform for `i32` samples.
+    pub fn make_cdf53_i32() -> Box<dyn DwtExecutor<i32> + Send + Sync> {
+        Box::new(Cdf53Integer::<i32, i32>::default())
+    }
+
+    /// Creates a new **CDF 5/3 (LeGall)** discrete wavelet transform executor for `f32` signals.
+    ///
+    /// # Overview
+    /// This function constructs a forward and inverse CDF 5/3 (LeGall) wavelet transform
+    /// implementation using a **floating-point lifting scheme**.
+    ///
+    /// # Notes
+    /// - Since the transform is fully floating-point, it does **not** perform rounding
+    ///   or truncation (unlike the integer version).
+    /// - It is suitable for audio, image, or scientific signal processing where
+    ///   moderate precision and performance are acceptable.
+    ///
+    /// # Returns
+    /// A boxed dynamic trait object implementing [`DwtExecutor<f32>`],
+    /// capable of performing both forward and inverse transforms.
+    pub fn make_cdf53_f32() -> Box<dyn DwtExecutor<f32> + Send + Sync> {
+        Box::new(Cdf53::<f32>::default())
+    }
+
+    /// Creates a new **CDF 5/3 (LeGall)** discrete wavelet transform executor for `f64` signals.
+    ///
+    /// # Overview
+    /// This constructs a forward and inverse CDF 5/3 (LeGall) wavelet transform
+    /// implementation using a **floating-point lifting scheme**.
+    ///
+    /// # Notes
+    /// - Fully reversible only in theory; in practice, due to floating-point rounding,
+    ///   reconstruction error is on the order of 1e−14–1e−15 per sample.
+    /// - Suitable for high-precision signal processing or scientific workloads.
+    ///
+    /// # Returns
+    /// A boxed dynamic trait object implementing [`DwtExecutor<f64>`],
+    /// providing both forward and inverse transform capabilities.
+    pub fn make_cdf53_f64() -> Box<dyn DwtExecutor<f64> + Send + Sync> {
+        Box::new(Cdf53::<f64>::default())
+    }
+
+    /// Create a forward and inverse DWT executor for the CDF 9/7 wavelet using `f32`.
+    ///
+    /// # Description
+    /// This returns a boxed `DwtExecutor<f32>` that implements both forward and inverse
+    /// discrete wavelet transforms using the CDF 9/7 lifting scheme.
+    ///
+    /// # Returns
+    /// - `Box<dyn DwtExecutor<f32> + Send + Sync>`: A heap-allocated DWT executor object
+    ///   that is thread-safe and can be shared across threads.
+    pub fn make_cdf97_f32() -> Box<dyn DwtExecutor<f32> + Send + Sync> {
+        Box::new(Cdf97::<f32>::default())
+    }
+
+    /// Create a forward and inverse DWT executor for the CDF 9/7 wavelet using `f64`.
+    ///
+    /// # Description
+    /// This returns a boxed `DwtExecutor<f64>` that implements both forward and inverse
+    /// discrete wavelet transforms using the CDF 9/7 lifting scheme.
+    ///
+    /// # Returns
+    /// - `Box<dyn DwtExecutor<f64> + Send + Sync>`: A heap-allocated DWT executor object
+    ///   that is thread-safe and can be shared across threads.
+    pub fn make_cdf97_f64() -> Box<dyn DwtExecutor<f64> + Send + Sync> {
+        Box::new(Cdf97::<f64>::default())
     }
 }

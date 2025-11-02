@@ -56,11 +56,11 @@ fn dwt97_forward_update_even<
 >(
     approx: &mut [T],
     details: &mut [T],
-    c: f64,
+    c: T,
 ) where
     f64: AsPrimitive<T>,
 {
-    let u = (details[0] + details[0]) * c.as_();
+    let u = (details[0] + details[0]) * c;
     approx[0] = approx[0] + u;
 
     let details_next = &details[1..];
@@ -74,7 +74,7 @@ fn dwt97_forward_update_even<
     {
         let d_left = *detail;
         let d_right = *detail_next;
-        let update = (d_left + d_right) * c.as_();
+        let update = (d_left + d_right) * c;
         *dst = *dst + update;
     }
 
@@ -82,7 +82,7 @@ fn dwt97_forward_update_even<
         let i = approx.len() - 1;
         let d_left = details[i - 1];
         let d_right = *details.last().unwrap();
-        let update = (d_left + d_right) * c.as_();
+        let update = (d_left + d_right) * c;
         approx[i] = approx[i] + update;
     }
 }
@@ -98,7 +98,7 @@ fn dwt97_forward_update_odd<
 >(
     approx: &mut [T],
     details: &mut [T],
-    c: f64,
+    c: T,
 ) where
     f64: AsPrimitive<T>,
 {
@@ -108,7 +108,7 @@ fn dwt97_forward_update_odd<
         .zip(approx.iter())
         .zip(approx_next.iter())
     {
-        let update = (src_left + src_right) * c.as_();
+        let update = (src_left + src_right) * c;
         *dst = *dst + update;
     }
 
@@ -117,85 +117,8 @@ fn dwt97_forward_update_odd<
         let src_left = approx[i - 1];
         // at boundary, mirror last sample
         let src_right = src_left;
-        let update = (src_left + src_right) * c.as_();
+        let update = (src_left + src_right) * c;
         details[i - 1] = details[i - 1] + update;
-    }
-}
-
-fn dwt97_inverse_update_odd<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + Sub<T, Output = T>,
->(
-    approx: &mut [T],
-    details: &mut [T],
-    c: f64,
-) where
-    f64: AsPrimitive<T>,
-{
-    let approx_next = &approx[1..];
-    for ((dst, &src_left), &src_right) in details
-        .iter_mut()
-        .zip(approx.iter())
-        .zip(approx_next.iter())
-    {
-        let update = (src_left + src_right) * c.as_();
-        *dst = *dst - update;
-    }
-
-    if approx.len() == details.len() {
-        let i = details.len();
-        let src_left = approx[i - 1];
-        // at boundary, mirror last sample
-        let src_right = src_left;
-        let update = (src_left + src_right) * c.as_();
-        details[i - 1] = details[i - 1] - update;
-    }
-}
-
-fn dwt97_inverse_update_even<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + Sub<T, Output = T>,
->(
-    approx: &mut [T],
-    details: &mut [T],
-    c: f64,
-) where
-    f64: AsPrimitive<T>,
-{
-    let u = (details[0] + details[0]) * c.as_();
-    approx[0] = approx[0] - u;
-
-    let details_next = &details[1..];
-    let approx_len = approx.len();
-    let approx_k = &mut approx[1..approx_len - 1];
-
-    for ((dst, detail), detail_next) in approx_k
-        .iter_mut()
-        .zip(details.iter())
-        .zip(details_next.iter())
-    {
-        let d_left = *detail;
-        let d_right = *detail_next;
-        let update = (d_left + d_right) * c.as_();
-        *dst = *dst - update;
-    }
-
-    if approx.len() > 1 {
-        let i = approx.len() - 1;
-        let d_left = details[i - 1];
-        let d_right = *details.last().unwrap();
-        let update = (d_left + d_right) * c.as_();
-        approx[i] = approx[i] - update;
     }
 }
 
@@ -261,13 +184,13 @@ where
         }
 
         // Update 1: even += beta * (odd_left + odd_right)
-        dwt97_forward_update_even(approx, details, BETA);
+        dwt97_forward_update_even(approx, details, BETA.as_());
 
         // Predict 2: odd += gamma * (even_left + even_right)
-        dwt97_forward_update_odd(approx, details, GAMMA);
+        dwt97_forward_update_odd(approx, details, GAMMA.as_());
 
         // Update 2: even += delta * (odd_left + odd_right)
-        dwt97_forward_update_even(approx, details, DELTA);
+        dwt97_forward_update_even(approx, details, DELTA.as_());
 
         Ok(())
     }
@@ -304,16 +227,16 @@ where
         let mut detail_inv = details.to_vec();
 
         // Inverse update 2: even -= delta * (odd_left + odd_right)
-        dwt97_inverse_update_even(&mut approx_inv, &mut detail_inv, DELTA);
+        dwt97_forward_update_even(&mut approx_inv, &mut detail_inv, (-DELTA).as_());
 
         // Inverse predict 2: odd -= gamma * (even_left + even_right)
-        dwt97_inverse_update_odd(&mut approx_inv, &mut detail_inv, GAMMA);
+        dwt97_forward_update_odd(&mut approx_inv, &mut detail_inv, (-GAMMA).as_());
 
         // Inverse update 1: even -= beta * (odd_left + odd_right) >> 14
-        dwt97_inverse_update_even(&mut approx_inv, &mut detail_inv, BETA);
+        dwt97_forward_update_even(&mut approx_inv, &mut detail_inv, (-BETA).as_());
 
         // Inverse predict 1: odd -= alpha * (even_left + even_right) >> 14
-        dwt97_inverse_update_odd(&mut approx_inv, &mut detail_inv, ALPHA);
+        dwt97_forward_update_odd(&mut approx_inv, &mut detail_inv, (-ALPHA).as_());
 
         // Interleave approx and detail to reconstruct signal
         for ((dst, &src_even), &src_odd) in output

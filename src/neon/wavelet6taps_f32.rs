@@ -133,9 +133,10 @@ impl DwtForwardExecutor<f32> for NeonWavelet6TapsF32 {
 
             let approx = approx.chunks_exact_mut(4).into_remainder();
             let details = details.chunks_exact_mut(4).into_remainder();
+            let padded_input = padded_input.get_unchecked(processed * 2..);
 
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
-                let base = 2 * (processed + i);
+                let base = 2 * i;
                 let input = padded_input.get_unchecked(base..);
 
                 let xw = vld1q_f32(input.as_ptr());

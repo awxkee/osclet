@@ -124,8 +124,16 @@ impl DwtFactory<f32> for f32 {
         border_mode: BorderMode,
         dwt: &[f32; 8],
     ) -> Box<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
-        use crate::wavelet8taps::Wavelet8Taps;
-        Box::new(Wavelet8Taps::new(border_mode, dwt))
+        #[cfg(all(target_arch = "aarch64", feature = "neon"))]
+        {
+            use crate::neon::NeonWavelet8TapsF32;
+            Box::new(NeonWavelet8TapsF32::new(border_mode, dwt))
+        }
+        #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
+        {
+            use crate::wavelet8taps::Wavelet8Taps;
+            Box::new(Wavelet8Taps::new(border_mode, dwt))
+        }
     }
 
     fn wavelet_n_taps(

@@ -1,5 +1,5 @@
 /*
- * // Copyright (c) Radzivon Bartoshyk 10/2025. All rights reserved.
+ * // Copyright (c) Radzivon Bartoshyk 11/2025. All rights reserved.
  * //
  * // Redistribution and use in source and binary forms, with or without modification,
  * // are permitted provided that the following conditions are met:
@@ -32,43 +32,30 @@ use crate::filter_padding::make_arena_1d;
 use crate::mla::fmla;
 use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr};
 use crate::{DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor};
-use num_traits::{AsPrimitive, MulAdd};
-use std::fmt::Debug;
-use std::marker::PhantomData;
-use std::ops::{Add, Mul};
+use std::arch::aarch64::*;
 
-pub(crate) struct Wavelet8Taps<T> {
-    phantom_data: PhantomData<T>,
+pub(crate) struct NeonWavelet8TapsF32 {
     border_mode: BorderMode,
-    low_pass: [T; 8],
-    high_pass: [T; 8],
+    low_pass: [f32; 8],
+    high_pass: [f32; 8],
 }
 
-impl<T: Copy + 'static + Debug + Default + Mul<T, Output = T>> Wavelet8Taps<T>
-where
-    f64: AsPrimitive<T>,
-{
-    #[allow(unused)]
-    pub(crate) fn new(border_mode: BorderMode, wavelet: &[T; 8]) -> Self {
+impl NeonWavelet8TapsF32 {
+    pub(crate) fn new(border_mode: BorderMode, wavelet: &[f32; 8]) -> Self {
         Self {
             border_mode,
             low_pass: *wavelet,
             high_pass: low_pass_to_high_from_arr(wavelet),
-            phantom_data: PhantomData,
         }
     }
 }
 
-impl<T: Copy + 'static + MulAdd<T, Output = T> + Add<T, Output = T> + Mul<T, Output = T> + Default>
-    DwtForwardExecutor<T> for Wavelet8Taps<T>
-where
-    f64: AsPrimitive<T>,
-{
+impl DwtForwardExecutor<f32> for NeonWavelet8TapsF32 {
     fn execute_forward(
         &self,
-        input: &[T],
-        approx: &mut [T],
-        details: &mut [T],
+        input: &[f32],
+        approx: &mut [f32],
+        details: &mut [f32],
     ) -> Result<(), OscletError> {
         let half = dwt_length(input.len(), 8);
 
@@ -92,64 +79,38 @@ where
         let padded_input = make_arena_1d(input, left_pad, right_pad, self.border_mode)?;
 
         unsafe {
-            for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
-                let mut a = 0.0f64.as_();
-                let mut d = 0.0f64.as_();
-                let base = 2 * i;
+            let h = vld1q_f32(self.low_pass.as_ptr());
+            let h2 = vld1q_f32(self.low_pass.get_unchecked(4..).as_ptr());
+            let g = vld1q_f32(self.high_pass.as_ptr());
+            let g2 = vld1q_f32(self.high_pass.get_unchecked(4..).as_ptr());
 
+            for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
+                let base = 2 * i;
                 let input = padded_input.get_unchecked(base..);
 
-                let x0 = input.get_unchecked(0);
-                let x1 = input.get_unchecked(1);
-                let x2 = input.get_unchecked(2);
-                let x3 = input.get_unchecked(3);
-                let x4 = input.get_unchecked(4);
-                let x5 = input.get_unchecked(5);
-                let x6 = input.get_unchecked(6);
-                let x7 = input.get_unchecked(7);
+                let xw = vld1q_f32(input.as_ptr());
+                let xw1 = vld1q_f32(input.get_unchecked(4..).as_ptr());
 
-                a = fmla(self.low_pass[0], *x0, a);
-                d = fmla(self.high_pass[0], *x0, d);
+                let a = vfmaq_f32(vmulq_f32(xw, h), xw1, h2);
+                let d = vfmaq_f32(vmulq_f32(xw, g), xw1, g2);
 
-                a = fmla(self.low_pass[1], *x1, a);
-                d = fmla(self.high_pass[1], *x1, d);
+                let a0 = vpadds_f32(vadd_f32(vget_low_f32(a), vget_high_f32(a)));
+                let d0 = vpadds_f32(vadd_f32(vget_low_f32(d), vget_high_f32(d)));
 
-                a = fmla(self.low_pass[2], *x2, a);
-                d = fmla(self.high_pass[2], *x2, d);
-
-                a = fmla(self.low_pass[3], *x3, a);
-                d = fmla(self.high_pass[3], *x3, d);
-
-                a = fmla(self.low_pass[4], *x4, a);
-                d = fmla(self.high_pass[4], *x4, d);
-
-                a = fmla(self.low_pass[5], *x5, a);
-                d = fmla(self.high_pass[5], *x5, d);
-
-                a = fmla(self.low_pass[6], *x6, a);
-                d = fmla(self.high_pass[6], *x6, d);
-
-                a = fmla(self.low_pass[7], *x7, a);
-                d = fmla(self.high_pass[7], *x7, d);
-
-                *approx = a;
-                *detail = d;
+                *approx = a0;
+                *detail = d0;
             }
         }
         Ok(())
     }
 }
 
-impl<T: Copy + 'static + MulAdd<T, Output = T> + Add<T, Output = T> + Mul<T, Output = T> + Default>
-    DwtInverseExecutor<T> for Wavelet8Taps<T>
-where
-    f64: AsPrimitive<T>,
-{
+impl DwtInverseExecutor<f32> for NeonWavelet8TapsF32 {
     fn execute_inverse(
         &self,
-        approx: &[T],
-        details: &[T],
-        output: &mut [T],
+        approx: &[f32],
+        details: &[f32],
+        output: &mut [f32],
     ) -> Result<(), OscletError> {
         if approx.len() != details.len() {
             return Err(OscletError::ApproxDetailsNotMatches(
@@ -187,50 +148,51 @@ where
                 }
             }
 
-            for i in safe_start..safe_end {
+            let h0 = vld1q_f32(self.low_pass.as_ptr());
+            let h2 = vld1q_f32(self.low_pass.get_unchecked(4..).as_ptr());
+            let g0 = vld1q_f32(self.high_pass.as_ptr());
+            let g2 = vld1q_f32(self.high_pass.get_unchecked(4..).as_ptr());
+
+            let mut ui = safe_start;
+
+            while ui + 2 < safe_end {
+                let (h, g) = (
+                    vld1_f32(approx.get_unchecked(ui)),
+                    vld1_f32(details.get_unchecked(ui)),
+                );
+                let k = 2 * ui as isize - FILTER_OFFSET as isize;
+                let part0 = output.get_unchecked_mut(k as usize..);
+                let q0 = vld1q_f32(part0.as_ptr());
+                let q1 = vld1q_f32(part0.get_unchecked(4..).as_ptr());
+                let q2 = vld1_f32(part0.get_unchecked(8..).as_ptr());
+
+                let w0 = vfmaq_lane_f32::<0>(vfmaq_lane_f32::<0>(q0, h0, h), g0, g);
+                let w1 = vfmaq_lane_f32::<0>(vfmaq_lane_f32::<0>(q1, h2, h), g2, g);
+
+                let interim_w0 = vcombine_f32(vget_high_f32(w0), vget_low_f32(w1));
+                let interim_w1 = vcombine_f32(vget_high_f32(w1), q2);
+
+                let w3 = vfmaq_lane_f32::<1>(vfmaq_lane_f32::<1>(interim_w0, h0, h), g0, g);
+                let w4 = vfmaq_lane_f32::<1>(vfmaq_lane_f32::<1>(interim_w1, h2, h), g2, g);
+
+                vst1_f32(part0.as_mut_ptr(), vget_low_f32(w0));
+                vst1q_f32(part0.get_unchecked_mut(2..).as_mut_ptr(), w3);
+                vst1q_f32(part0.get_unchecked_mut(6..).as_mut_ptr(), w4);
+                ui += 2;
+            }
+
+            for i in ui..safe_end {
                 let (h, g) = (*approx.get_unchecked(i), *details.get_unchecked(i));
                 let k = 2 * i as isize - FILTER_OFFSET as isize;
                 let part = output.get_unchecked_mut(k as usize..);
-                *part.get_unchecked_mut(0) = fmla(
-                    self.low_pass[0],
-                    h,
-                    fmla(self.high_pass[0], g, *part.get_unchecked(0)),
-                );
-                *part.get_unchecked_mut(1) = fmla(
-                    self.low_pass[1],
-                    h,
-                    fmla(self.high_pass[1], g, *part.get_unchecked(1)),
-                );
-                *part.get_unchecked_mut(2) = fmla(
-                    self.low_pass[2],
-                    h,
-                    fmla(self.high_pass[2], g, *part.get_unchecked(2)),
-                );
-                *part.get_unchecked_mut(3) = fmla(
-                    self.low_pass[3],
-                    h,
-                    fmla(self.high_pass[3], g, *part.get_unchecked(3)),
-                );
-                *part.get_unchecked_mut(4) = fmla(
-                    self.low_pass[4],
-                    h,
-                    fmla(self.high_pass[4], g, *part.get_unchecked(4)),
-                );
-                *part.get_unchecked_mut(5) = fmla(
-                    self.low_pass[5],
-                    h,
-                    fmla(self.high_pass[5], g, *part.get_unchecked(5)),
-                );
-                *part.get_unchecked_mut(6) = fmla(
-                    self.low_pass[6],
-                    h,
-                    fmla(self.high_pass[6], g, *part.get_unchecked(6)),
-                );
-                *part.get_unchecked_mut(7) = fmla(
-                    self.low_pass[7],
-                    h,
-                    fmla(self.high_pass[7], g, *part.get_unchecked(7)),
-                );
+                let xw0 = vld1q_f32(part.as_ptr());
+                let xw1 = vld1q_f32(part.get_unchecked(4..).as_ptr());
+
+                let q0 = vfmaq_n_f32(vfmaq_n_f32(xw0, h0, h), g0, g);
+                let q2 = vfmaq_n_f32(vfmaq_n_f32(xw1, h2, h), g2, g);
+
+                vst1q_f32(part.as_mut_ptr(), q0);
+                vst1q_f32(part.get_unchecked_mut(4..).as_mut_ptr(), q2);
             }
 
             for i in safe_end..approx.len() {
@@ -252,19 +214,7 @@ where
     }
 }
 
-impl<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + Send
-        + Sync,
-> IncompleteDwtExecutor<T> for Wavelet8Taps<T>
-where
-    f64: AsPrimitive<T>,
-{
+impl IncompleteDwtExecutor<f32> for NeonWavelet8TapsF32 {
     fn filter_length(&self) -> usize {
         8
     }
@@ -280,7 +230,7 @@ mod tests {
         let input = vec![
             1.0, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3, 2.5,
         ];
-        let db4 = Wavelet8Taps::new(
+        let db4 = NeonWavelet8TapsF32::new(
             BorderMode::Wrap,
             DaubechiesFamily::Db4
                 .get_wavelet()
@@ -294,11 +244,11 @@ mod tests {
         db4.execute_forward(&input, &mut approx, &mut details)
             .unwrap();
 
-        const REFERENCE_APPROX: [f64; 12] = [
+        const REFERENCE_APPROX: [f32; 12] = [
             5.40180316, 1.17674293, 2.27895053, 3.08695254, 4.82517499, 0.91029972, 1.96020043,
             5.58301587, 8.40990105, 1.50316223, 2.42249936, 1.81502786,
         ];
-        const REFERENCE_DETAILS: [f64; 12] = [
+        const REFERENCE_DETAILS: [f32; 12] = [
             -1.48628267,
             0.41816403,
             -1.0992322,
@@ -315,16 +265,16 @@ mod tests {
 
         approx.iter().enumerate().for_each(|(i, x)| {
             assert!(
-                (REFERENCE_APPROX[i] - x).abs() < 1e-7,
-                "approx difference expected to be < 1e-7, but values were ref {}, derived {}",
+                (REFERENCE_APPROX[i] - x).abs() < 1e-3,
+                "approx difference expected to be < 1e-3, but values were ref {}, derived {}",
                 REFERENCE_APPROX[i],
                 x
             );
         });
         details.iter().enumerate().for_each(|(i, x)| {
             assert!(
-                (REFERENCE_DETAILS[i] - x).abs() < 1e-7,
-                "details difference expected to be < 1e-7, but values were ref {}, derived {}",
+                (REFERENCE_DETAILS[i] - x).abs() < 1e-3,
+                "details difference expected to be < 1e-3, but values were ref {}, derived {}",
                 REFERENCE_DETAILS[i],
                 x
             );
@@ -335,8 +285,8 @@ mod tests {
             .unwrap();
         reconstructed.iter().take(input.len()).enumerate().for_each(|(i, x)| {
             assert!(
-                (input[i] - x).abs() < 1e-7,
-                "reconstructed difference expected to be < 1e-7, but values were ref {}, derived {}",
+                (input[i] - x).abs() < 1e-3,
+                "reconstructed difference expected to be < 1e-3, but values were ref {}, derived {}",
                 input[i],
                 x
             );
@@ -348,7 +298,7 @@ mod tests {
         let input = vec![
             1.0, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3,
         ];
-        let db4 = Wavelet8Taps::new(
+        let db4 = NeonWavelet8TapsF32::new(
             BorderMode::Wrap,
             DaubechiesFamily::Db4
                 .get_wavelet()
@@ -362,11 +312,11 @@ mod tests {
         db4.execute_forward(&input, &mut approx, &mut details)
             .unwrap();
 
-        const REFERENCE_APPROX: [f64; 11] = [
+        const REFERENCE_APPROX: [f32; 11] = [
             8.34997913, 1.83684144, 1.23683239, 3.08695254, 4.82517499, 0.91029972, 1.96020043,
             5.58301587, 8.34997913, 1.83684144, 1.23683239,
         ];
-        const REFERENCE_DETAILS: [f64; 11] = [
+        const REFERENCE_DETAILS: [f32; 11] = [
             -0.54333491,
             0.1170128,
             -1.05129466,
@@ -382,16 +332,16 @@ mod tests {
 
         approx.iter().enumerate().for_each(|(i, x)| {
             assert!(
-                (REFERENCE_APPROX[i] - x).abs() < 1e-7,
-                "approx difference expected to be < 1e-7, but values were ref {}, derived {}",
+                (REFERENCE_APPROX[i] - x).abs() < 1e-3,
+                "approx difference expected to be < 1e-3, but values were ref {}, derived {}",
                 REFERENCE_APPROX[i],
                 x
             );
         });
         details.iter().enumerate().for_each(|(i, x)| {
             assert!(
-                (REFERENCE_DETAILS[i] - x).abs() < 1e-7,
-                "details difference expected to be < 1e-7, but values were ref {}, derived {}",
+                (REFERENCE_DETAILS[i] - x).abs() < 1e-3,
+                "details difference expected to be < 1e-3, but values were ref {}, derived {}",
                 REFERENCE_DETAILS[i],
                 x
             );
@@ -402,8 +352,8 @@ mod tests {
             .unwrap();
         reconstructed.iter().take(input.len()).enumerate().for_each(|(i, x)| {
             assert!(
-                (input[i] - x).abs() < 1e-7,
-                "reconstructed difference expected to be < 1e-7, but values were ref {}, derived {}",
+                (input[i] - x).abs() < 1e-3,
+                "reconstructed difference expected to be < 1e-3, but values were ref {}, derived {}",
                 input[i],
                 x
             );
@@ -417,7 +367,7 @@ mod tests {
         for i in 0..data_length {
             input[i] = i as f32 / data_length as f32;
         }
-        let db4 = Wavelet8Taps::new(
+        let db4 = NeonWavelet8TapsF32::new(
             BorderMode::Wrap,
             DaubechiesFamily::Db4
                 .get_wavelet()
@@ -436,8 +386,8 @@ mod tests {
             .unwrap();
         reconstructed.iter().take(input.len()).enumerate().for_each(|(i, x)| {
             assert!(
-                (input[i] - x).abs() < 1e-7,
-                "reconstructed difference expected to be < 1e-7, but values were ref {}, derived {}",
+                (input[i] - x).abs() < 1e-3,
+                "reconstructed difference expected to be < 1e-3, but values were ref {}, derived {}",
                 input[i],
                 x
             );

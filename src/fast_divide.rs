@@ -141,6 +141,66 @@ impl DividerIsize {
     }
 }
 
+#[cfg(target_pointer_width = "32")]
+impl DividerIsize {
+    pub(crate) fn new(divisor: isize) -> Self {
+        let ud: u32 = divisor as u32;
+        let ud: u32 = if divisor < 0 {
+            divisor.wrapping_neg() as u32
+        } else {
+            ud
+        };
+        let floor_log_2_d = 31 - ud.leading_zeros();
+        if (ud & (ud - 1)) == 0 {
+            // Branchfree and non-branchfree cases are the same
+            return DividerIsize {
+                magic: 0,
+                more: floor_log_2_d as u8,
+                divisor,
+                abs_divisor: divisor.abs(),
+            };
+        }
+        // the dividend here is 2**(floor_log_2_d + 63), so the low 64 bit word
+        // is 0 and the high word is floor_log_2_d - 1
+        let num = 1u64 << (floor_log_2_d - 1);
+        let u_div = ud as u64;
+        let v = ((num) << 32).div_rem_euclid(&u_div);
+        let (mut proposed_m, rem) = (v.0 as u32, v.1 as u32);
+        let e = ud - rem;
+
+        // We are going to start with a power of floor_log_2_d - 1.
+        // This works if e < 2**floor_log_2_d.
+        let mut more: u8 = if e < (1u32 << floor_log_2_d) {
+            // This power works
+            (floor_log_2_d - 1) as u8
+        } else {
+            // We need to go one higher. This should not make proposed_m
+            // overflow, but it will make it negative when interpreted as an
+            // int32_t.
+            proposed_m += proposed_m;
+            let twice_rem = rem + rem;
+            if twice_rem >= ud || twice_rem < rem {
+                proposed_m += 1;
+            }
+            (floor_log_2_d | 0x40) as u8
+        };
+        proposed_m += 1;
+        let mut magic: isize = proposed_m as isize;
+
+        // Mark if we are negative
+        if divisor < 0 {
+            more |= 0x80;
+            magic = -magic;
+        }
+        DividerIsize {
+            magic,
+            more,
+            divisor,
+            abs_divisor: divisor.abs(),
+        }
+    }
+}
+
 // impl DividerI32 {
 //     pub(crate) fn new(divisor: i32) -> DividerI32 {
 //         let ud: u32 = divisor as u32;
@@ -284,6 +344,40 @@ impl Div<DividerIsize> for isize {
                 let sign: isize = (denom.more >> 7) as isize;
                 // q += (more < 0 ? -numer : numer)
                 uq = uq.wrapping_add(((self as usize) ^ sign as usize) as isize - sign);
+            }
+            let mut q = uq;
+            q >>= shift;
+            q += (q < 0) as isize;
+            q
+        }
+    }
+}
+
+#[cfg(target_pointer_width = "32")]
+impl Div<DividerIsize> for isize {
+    type Output = isize;
+
+    #[inline(always)]
+    fn div(self, denom: DividerIsize) -> Self::Output {
+        let shift = denom.more & 0x3F;
+
+        if denom.magic == 0 {
+            // shift path
+            let mask = (1u32 << shift) - 1;
+            let uq: u32 = (self as u32).wrapping_add((self >> 31) as u32 & mask);
+            let mut q = uq as isize;
+            q >>= shift;
+            // must be arithmetic shift and then sign-extend
+            let sign: isize = (denom.more >> 7) as isize;
+            q = (q ^ sign) - sign;
+            q
+        } else {
+            let mut uq = mulhi_isize(self, denom.magic);
+            if (denom.more & 0x40) != 0 {
+                // must be arithmetic shift and then sign extend
+                let sign: isize = (denom.more >> 7) as isize;
+                // q += (more < 0 ? -numer : numer)
+                uq = uq.wrapping_add(((self as u32) ^ sign as u32) as isize - sign);
             }
             let mut q = uq;
             q >>= shift;

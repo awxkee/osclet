@@ -186,18 +186,18 @@ fn dwt97_forward_update_odd(approx: &[f32], details: &mut [f32], c: f32) {
 
 fn dwt97_scale(approx: &mut [f32], details: &mut [f32], k: f32, inv_k: f32) {
     for (a_dst, d_dst) in approx.iter_mut().zip(details.iter_mut()) {
-        *a_dst = *a_dst * k;
-        *d_dst = *d_dst * inv_k;
+        *a_dst *= k;
+        *d_dst *= inv_k;
     }
     if approx.len() < details.len() {
         let det_left = &mut details[approx.len()..];
         for x in det_left.iter_mut() {
-            *x = *x * inv_k;
+            *x *= inv_k;
         }
     } else if approx.len() > details.len() {
         let app_left = &mut approx[details.len()..];
         for x in app_left.iter_mut() {
-            *x = *x * k;
+            *x *= k;
         }
     }
 }
@@ -287,16 +287,16 @@ impl DwtInverseExecutor<f32> for NeonCdf97F32 {
         dwt97_scale(&mut approx_inv, &mut detail_inv, INV_K, K);
 
         // Inverse update 2: even -= delta * (odd_left + odd_right)
-        dwt97_forward_update_even(&mut approx_inv, &mut detail_inv, -DELTA);
+        dwt97_forward_update_even(&mut approx_inv, &detail_inv, -DELTA);
 
         // Inverse predict 2: odd -= gamma * (even_left + even_right)
-        dwt97_forward_update_odd(&mut approx_inv, &mut detail_inv, -GAMMA);
+        dwt97_forward_update_odd(&approx_inv, &mut detail_inv, -GAMMA);
 
         // Inverse update 1: even -= beta * (odd_left + odd_right) >> 14
-        dwt97_forward_update_even(&mut approx_inv, &mut detail_inv, -BETA);
+        dwt97_forward_update_even(&mut approx_inv, &detail_inv, -BETA);
 
         // Inverse predict 1: odd -= alpha * (even_left + even_right) >> 14
-        dwt97_forward_update_odd(&mut approx_inv, &mut detail_inv, -ALPHA);
+        dwt97_forward_update_odd(&approx_inv, &mut detail_inv, -ALPHA);
 
         // Interleave approx and detail to reconstruct signal
         for ((dst, &src_even), &src_odd) in output

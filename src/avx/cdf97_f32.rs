@@ -91,18 +91,18 @@ fn dwt97_forward_update_odd(approx: &mut [f32], details: &mut [f32], c: f32) {
 #[target_feature(enable = "avx2", enable = "fma")]
 fn dwt97_scale(approx: &mut [f32], details: &mut [f32], k: f32, inv_k: f32) {
     for (a_dst, d_dst) in approx.iter_mut().zip(details.iter_mut()) {
-        *a_dst = *a_dst * k;
-        *d_dst = *d_dst * inv_k;
+        *a_dst *= k;
+        *d_dst *= inv_k;
     }
     if approx.len() < details.len() {
         let det_left = &mut details[approx.len()..];
         for x in det_left.iter_mut() {
-            *x = *x * inv_k;
+            *x *= inv_k;
         }
     } else if approx.len() > details.len() {
         let app_left = &mut approx[details.len()..];
         for x in app_left.iter_mut() {
-            *x = *x * k;
+            *x *= k;
         }
     }
 }

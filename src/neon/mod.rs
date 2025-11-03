@@ -28,6 +28,8 @@
  */
 mod convolve1d_f32;
 mod convolve1d_f64;
+mod wavelet10taps_f32;
+mod wavelet10taps_f64;
 mod wavelet2taps;
 mod wavelet4taps_f32;
 mod wavelet4taps_f64;
@@ -45,3 +47,5 @@ pub(crate) use wavelet6taps_f32::NeonWavelet6TapsF32;
 pub(crate) use wavelet6taps_f64::NeonWavelet6TapsF64;
 pub(crate) use wavelet8taps_f32::NeonWavelet8TapsF32;
 pub(crate) use wavelet8taps_f64::NeonWavelet8TapsF64;
+pub(crate) use wavelet10taps_f32::NeonWavelet10TapsF32;
+pub(crate) use wavelet10taps_f64::NeonWavelet10TapsF64;

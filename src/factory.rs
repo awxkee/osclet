@@ -158,8 +158,16 @@ impl DwtFactory<f32> for f32 {
         border_mode: BorderMode,
         dwt: &[f32; 10],
     ) -> Box<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
-        use crate::wavelet10taps::Wavelet10Taps;
-        Box::new(Wavelet10Taps::new(border_mode, dwt))
+        #[cfg(all(target_arch = "aarch64", feature = "neon"))]
+        {
+            use crate::neon::NeonWavelet10TapsF32;
+            Box::new(NeonWavelet10TapsF32::new(border_mode, dwt))
+        }
+        #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
+        {
+            use crate::wavelet10taps::Wavelet10Taps;
+            Box::new(Wavelet10Taps::new(border_mode, dwt))
+        }
     }
 
     fn wavelet_n_taps(
@@ -268,8 +276,16 @@ impl DwtFactory<f64> for f64 {
         border_mode: BorderMode,
         dwt: &[f64; 10],
     ) -> Box<dyn IncompleteDwtExecutor<f64> + Send + Sync> {
-        use crate::wavelet10taps::Wavelet10Taps;
-        Box::new(Wavelet10Taps::new(border_mode, dwt))
+        #[cfg(all(target_arch = "aarch64", feature = "neon"))]
+        {
+            use crate::neon::NeonWavelet10TapsF64;
+            Box::new(NeonWavelet10TapsF64::new(border_mode, dwt))
+        }
+        #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
+        {
+            use crate::wavelet10taps::Wavelet10Taps;
+            Box::new(Wavelet10Taps::new(border_mode, dwt))
+        }
     }
 
     fn wavelet_n_taps(

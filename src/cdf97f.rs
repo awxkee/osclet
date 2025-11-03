@@ -121,11 +121,20 @@ fn dwt97_forward_update_odd<
 }
 
 fn dwt97_scale<T: Mul<T, Output = T> + Copy>(approx: &mut [T], details: &mut [T], k: T, inv_k: T) {
-    for x in approx.iter_mut() {
-        *x = *x * k;
+    for (a_dst, d_dst) in approx.iter_mut().zip(details.iter_mut()) {
+        *a_dst = *a_dst * k;
+        *d_dst = *d_dst * inv_k;
     }
-    for x in details.iter_mut() {
-        *x = *x * inv_k;
+    if approx.len() < details.len() {
+        let det_left = &mut details[approx.len()..];
+        for x in det_left.iter_mut() {
+            *x = *x * inv_k;
+        }
+    } else if approx.len() > details.len() {
+        let app_left = &mut approx[details.len()..];
+        for x in app_left.iter_mut() {
+            *x = *x * k;
+        }
     }
 }
 

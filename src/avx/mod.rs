@@ -32,6 +32,7 @@ mod wavelet4taps_f32;
 mod wavelet4taps_f64;
 mod wavelet6taps_f32;
 mod wavelet6taps_f64;
+mod wavelet8taps_f32;
 mod wavelet8taps_f64;
 
 pub(crate) use wavelet2taps::{AvxWavelet2TapsF32, AvxWavelet2TapsF64};
@@ -39,4 +40,5 @@ pub(crate) use wavelet4taps_f32::AvxWavelet4TapsF32;
 pub(crate) use wavelet4taps_f64::AvxWavelet4TapsF64;
 pub(crate) use wavelet6taps_f32::AvxWavelet6TapsF32;
 pub(crate) use wavelet6taps_f64::AvxWavelet6TapsF64;
+pub(crate) use wavelet8taps_f32::AvxWavelet8TapsF32;
 pub(crate) use wavelet8taps_f64::AvxWavelet8TapsF64;

@@ -62,6 +62,7 @@ mod wavelet6taps;
 mod wavelet8taps;
 mod wavelet_n_taps;
 
+use crate::avx::AvxCdf97F32;
 use crate::cdf53f::Cdf53;
 use crate::cdf53i::Cdf53Integer;
 use crate::cdf97f::Cdf97;
@@ -637,7 +638,23 @@ impl Osclet {
     /// - `Box<dyn DwtExecutor<f32> + Send + Sync>`: A heap-allocated DWT executor object
     ///   that is thread-safe and can be shared across threads.
     pub fn make_cdf97_f32() -> Box<dyn DwtExecutor<f32> + Send + Sync> {
-        Box::new(Cdf97::<f32>::default())
+        #[cfg(all(target_arch = "aarch64", feature = "neon"))]
+        {
+            use crate::neon::NeonCdf97F32;
+            Box::new(NeonCdf97F32::default())
+        }
+        #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+        {
+            use crate::factory::has_valid_avx;
+            if has_valid_avx() {
+                use crate::avx::AvxCdf97F32;
+                return Box::new(AvxCdf97F32::default());
+            }
+        }
+        #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
+        {
+            Box::new(Cdf97::<f32>::default())
+        }
     }
 
     /// Create a forward and inverse DWT executor for the CDF 9/7 wavelet using `f64`.

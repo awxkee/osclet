@@ -26,6 +26,7 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+mod cdf97_f32;
 mod convolve1d_f32;
 mod convolve1d_f64;
 mod util;
@@ -37,6 +38,7 @@ mod wavelet6taps_f64;
 mod wavelet8taps_f32;
 mod wavelet8taps_f64;
 
+pub(crate) use cdf97_f32::AvxCdf97F32;
 pub(crate) use convolve1d_f32::AvxConvolution1dF32;
 pub(crate) use convolve1d_f64::AvxConvolution1dF64;
 pub(crate) use wavelet2taps::{AvxWavelet2TapsF32, AvxWavelet2TapsF64};

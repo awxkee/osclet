@@ -36,6 +36,7 @@ use std::ops::{Add, Mul, Neg};
 
 #[cfg(all(target_arch = "x86_64", feature = "avx"))]
 mod avx;
+mod biorthogonal;
 mod border_mode;
 mod cdf53f;
 mod cdf53i;
@@ -67,6 +68,7 @@ use crate::convolve1d::ConvolveFactory;
 use crate::factory::DwtFactory;
 use crate::modwt::{MoDwtHandler, Sqrt2Provider};
 use crate::util::fill_wavelet;
+pub use biorthogonal::BiorthogonalFamily;
 pub use border_mode::BorderMode;
 pub use coiflet::CoifletFamily;
 pub use daubechies::DaubechiesFamily;
@@ -277,6 +279,28 @@ impl Osclet {
         Box::new(CompletedDwtExecutor::new(intercept))
     }
 
+    /// Internal implementation for creating a Biorthogonal wavelet executor.
+    fn make_biorthogonal_impl<
+        T: DwtFactory<T>
+            + 'static
+            + Copy
+            + Default
+            + Send
+            + Sync
+            + MulAdd<T, Output = T>
+            + Add<T, Output = T>
+            + Mul<T, Output = T>,
+    >(
+        biorthogonal: BiorthogonalFamily,
+        border_mode: BorderMode,
+    ) -> Box<dyn DwtExecutor<T> + Send + Sync>
+    where
+        f64: AsPrimitive<T>,
+    {
+        let intercept = Self::default_factory(border_mode, biorthogonal);
+        Box::new(CompletedDwtExecutor::new(intercept))
+    }
+
     /// Internal implementation for creating a Symlet wavelet executor.
     fn make_symlet_impl<
         T: DwtFactory<T>
@@ -386,6 +410,35 @@ impl Osclet {
         border_mode: BorderMode,
     ) -> Box<dyn DwtExecutor<f64> + Send + Sync> {
         Self::make_coiflet_impl(coif, border_mode)
+    }
+
+    /// Creates a Biorthogonal wavelet executor for `f32` signals.
+    ///
+    /// # Parameters
+    /// - `biorthogonal`: The Biorthogonal wavelet family.
+    /// - `border_mode`: How the signal edges are handled.
+    ///
+    /// # Returns
+    /// A boxed `DwtExecutor<f32>` for performing discrete wavelet transforms.
+    pub fn make_biorthogonal_f32(
+        biorthogonal: BiorthogonalFamily,
+        border_mode: BorderMode,
+    ) -> Box<dyn DwtExecutor<f32> + Send + Sync> {
+        Self::make_biorthogonal_impl(biorthogonal, border_mode)
+    }
+
+    /// Creates a Biorthogonal wavelet executor for `f64` signals.
+    ///
+    /// # Parameters
+    /// - `biorthogonal`: The Biorthogonal wavelet family.
+    /// - `border_mode`: How the signal edges are handled.
+    ///
+    /// Same as `make_biorthogonal_f32`, but for double-precision signals.
+    pub fn make_biorthogonal_f64(
+        biorthogonal: BiorthogonalFamily,
+        border_mode: BorderMode,
+    ) -> Box<dyn DwtExecutor<f64> + Send + Sync> {
+        Self::make_biorthogonal_impl(biorthogonal, border_mode)
     }
 
     /// Creates a Symlet wavelet executor for `f32` signals.

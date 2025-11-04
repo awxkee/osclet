@@ -8,14 +8,15 @@ version = "0.1.0"
 edition = "2024"
 description = "Play with wavelets! Or they will play with you."
 readme = "README.md"
-keywords = ["dwt", "wavelet"]
+keywords = ["dwt", "wavelet", "dsp"]
 license = "BSD-3-Clause OR Apache-2.0"
 authors = ["Radzivon Bartoshyk"]
 documentation = "https://github.com/awxkee/osclet"
-categories = ["algorithms", "science"]
+categories = ["mathematics", "algorithms", "science"]
 homepage = "https://github.com/awxkee/osclet"
 repository = "https://github.com/awxkee/osclet"
 exclude = ["*.jpg", "/assets", "*.png", "*.sh", "/assets/*"]
+include = ["/src/", "/README.md", "/LICENSE.md", "/LICENSE-APACHE.md"]
 rust-version = "1.87.0"
 
 [dependencies]

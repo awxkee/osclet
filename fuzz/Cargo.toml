@@ -47,3 +47,17 @@ path = "double_modwt/double_modwt.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "single_cdf97"
+path = "single_cdf97/single_cdf97.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "double_cdf97"
+path = "double_cdf97/double_cdf97.rs"
+test = false
+doc = false
+bench = false

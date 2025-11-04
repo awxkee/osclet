@@ -565,6 +565,14 @@ impl Osclet {
     /// A boxed [`DwtExecutor`] trait object implementing the CDF 5/3 integer
     /// forward and inverse transform for `i16` samples.
     pub fn make_cdf53_i16() -> Box<dyn DwtExecutor<i16> + Send + Sync> {
+        #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+        {
+            use crate::factory::has_valid_avx;
+            if has_valid_avx() {
+                use crate::avx::AvxCdf53Integer;
+                return Box::new(AvxCdf53Integer::<i16, i32>::default());
+            }
+        }
         Box::new(Cdf53Integer::<i16, i32>::default())
     }
 
@@ -587,6 +595,14 @@ impl Osclet {
     /// A boxed [`DwtExecutor`] trait object implementing the CDF 5/3 integer
     /// forward and inverse transform for `i32` samples.
     pub fn make_cdf53_i32() -> Box<dyn DwtExecutor<i32> + Send + Sync> {
+        #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+        {
+            use crate::factory::has_valid_avx;
+            if has_valid_avx() {
+                use crate::avx::AvxCdf53Integer;
+                return Box::new(AvxCdf53Integer::<i32, i32>::default());
+            }
+        }
         Box::new(Cdf53Integer::<i32, i32>::default())
     }
 
@@ -606,6 +622,14 @@ impl Osclet {
     /// A boxed dynamic trait object implementing [`DwtExecutor<f32>`],
     /// capable of performing both forward and inverse transforms.
     pub fn make_cdf53_f32() -> Box<dyn DwtExecutor<f32> + Send + Sync> {
+        #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+        {
+            use crate::factory::has_valid_avx;
+            if has_valid_avx() {
+                use crate::avx::AvxCdf53;
+                return Box::new(AvxCdf53::default());
+            }
+        }
         Box::new(Cdf53::<f32>::default())
     }
 
@@ -624,6 +648,14 @@ impl Osclet {
     /// A boxed dynamic trait object implementing [`DwtExecutor<f64>`],
     /// providing both forward and inverse transform capabilities.
     pub fn make_cdf53_f64() -> Box<dyn DwtExecutor<f64> + Send + Sync> {
+        #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+        {
+            use crate::factory::has_valid_avx;
+            if has_valid_avx() {
+                use crate::avx::AvxCdf53;
+                return Box::new(AvxCdf53::default());
+            }
+        }
         Box::new(Cdf53::<f64>::default())
     }
 
@@ -646,8 +678,8 @@ impl Osclet {
         {
             use crate::factory::has_valid_avx;
             if has_valid_avx() {
-                use crate::avx::AvxCdf97F32;
-                return Box::new(AvxCdf97F32::default());
+                use crate::avx::AvxCdf97;
+                return Box::new(AvxCdf97::default());
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
@@ -666,6 +698,14 @@ impl Osclet {
     /// - `Box<dyn DwtExecutor<f64> + Send + Sync>`: A heap-allocated DWT executor object
     ///   that is thread-safe and can be shared across threads.
     pub fn make_cdf97_f64() -> Box<dyn DwtExecutor<f64> + Send + Sync> {
+        #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+        {
+            use crate::factory::has_valid_avx;
+            if has_valid_avx() {
+                use crate::avx::AvxCdf97;
+                return Box::new(AvxCdf97::default());
+            }
+        }
         Box::new(Cdf97::<f64>::default())
     }
 }

@@ -26,6 +26,7 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+use crate::cdf53i::define_integer_cdf;
 use crate::err::{OscletError, try_vec};
 use crate::{
     Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor, MultiDwt,
@@ -35,7 +36,7 @@ use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Shr, Sub, SubAssign};
 
 #[derive(Default)]
-pub(crate) struct Cdf53Integer<T, V> {
+pub(crate) struct AvxCdf53Integer<T, V> {
     phantom0: PhantomData<T>,
     phantom1: PhantomData<V>,
 }
@@ -49,13 +50,39 @@ impl<
         + Copy
         + Sub<V, Output = V>
         + AsPrimitive<T>,
-> DwtForwardExecutor<T> for Cdf53Integer<T, V>
+> DwtForwardExecutor<T> for AvxCdf53Integer<T, V>
 where
     i32: AsPrimitive<V>,
 {
     /// Perform the forward CDF 5/3 DWT (lifting scheme) on a 1D signal.
     /// Splits the signal into approximation (low-pass) and detail (high-pass) coefficients.
     fn execute_forward(
+        &self,
+        input: &[T],
+        approx: &mut [T],
+        details: &mut [T],
+    ) -> Result<(), OscletError> {
+        unsafe { self.execute_forward_impl(input, approx, details) }
+    }
+}
+
+impl<
+    T: Copy + AsPrimitive<V> + 'static + AddAssign + WrappingAdd<Output = T>,
+    V: Copy
+        + 'static
+        + Add<V, Output = V>
+        + Shr<u32, Output = V>
+        + Copy
+        + Sub<V, Output = V>
+        + AsPrimitive<T>,
+> AvxCdf53Integer<T, V>
+where
+    i32: AsPrimitive<V>,
+{
+    /// Perform the forward CDF 5/3 DWT (lifting scheme) on a 1D signal.
+    /// Splits the signal into approximation (low-pass) and detail (high-pass) coefficients.
+    #[target_feature(enable = "avx2", enable = "fma")]
+    fn execute_forward_impl(
         &self,
         input: &[T],
         approx: &mut [T],
@@ -143,12 +170,37 @@ impl<
         + Copy
         + Sub<V, Output = V>
         + AsPrimitive<T>,
-> DwtInverseExecutor<T> for Cdf53Integer<T, V>
+> DwtInverseExecutor<T> for AvxCdf53Integer<T, V>
 where
     i32: AsPrimitive<V> + AsPrimitive<T>,
 {
     /// Perform the inverse CDF 5/3 DWT (lifting scheme) to reconstruct the original signal.
     fn execute_inverse(
+        &self,
+        approx: &[T],
+        details: &[T],
+        output: &mut [T],
+    ) -> Result<(), OscletError> {
+        unsafe { self.execute_inverse_impl(approx, details, output) }
+    }
+}
+
+impl<
+    T: Copy + AsPrimitive<V> + 'static + SubAssign + Default + WrappingSub<Output = T>,
+    V: Copy
+        + 'static
+        + Add<V, Output = V>
+        + Shr<u32, Output = V>
+        + Copy
+        + Sub<V, Output = V>
+        + AsPrimitive<T>,
+> AvxCdf53Integer<T, V>
+where
+    i32: AsPrimitive<V> + AsPrimitive<T>,
+{
+    /// Perform the inverse CDF 5/3 DWT (lifting scheme) to reconstruct the original signal.
+    #[target_feature(enable = "avx2", enable = "fma")]
+    fn execute_inverse_impl(
         &self,
         approx: &[T],
         details: &[T],
@@ -264,7 +316,7 @@ impl<
         + AsPrimitive<T>
         + Send
         + Sync,
-> IncompleteDwtExecutor<T> for Cdf53Integer<T, V>
+> IncompleteDwtExecutor<T> for AvxCdf53Integer<T, V>
 where
     i32: AsPrimitive<V> + AsPrimitive<T>,
 {
@@ -273,134 +325,7 @@ where
     }
 }
 
-macro_rules! define_integer_cdf {
-    ($clazz: ident, $min_taps: expr) => {
-        impl<
-            T: Copy
-                + AsPrimitive<V>
-                + 'static
-                + SubAssign
-                + Default
-                + Send
-                + Sync
-                + AddAssign
-                + WrappingSub<Output = T>
-                + WrappingAdd<Output = T>,
-            V: Copy
-                + 'static
-                + Add<V, Output = V>
-                + Shr<u32, Output = V>
-                + Copy
-                + Sub<V, Output = V>
-                + AsPrimitive<T>
-                + Send
-                + Sync,
-        > DwtExecutor<T> for $clazz<T, V>
-        where
-            i32: AsPrimitive<V> + AsPrimitive<T>,
-        {
-            fn dwt(&self, signal: &[T], level: usize) -> Result<Dwt<T>, OscletError> {
-                if signal.len() < $min_taps {
-                    return Err(OscletError::BufferWasTooSmallForLevel);
-                }
-                if level == 0 || level == 1 {
-                    let mut approx = try_vec![T::default(); signal.len().div_ceil(2)];
-                    let mut details = try_vec![T::default(); signal.len() / 2];
-
-                    self.execute_forward(signal, &mut approx, &mut details)?;
-
-                    Ok(Dwt {
-                        approximations: approx,
-                        details,
-                    })
-                } else {
-                    let mut current_signal = signal.to_vec();
-                    let mut approx = vec![];
-                    let mut details = vec![];
-
-                    for _ in 0..level {
-                        if current_signal.len() < $min_taps {
-                            return Err(OscletError::BufferWasTooSmallForLevel);
-                        }
-
-                        approx = try_vec![T::default(); current_signal.len().div_ceil(2)];
-                        details = try_vec![T::default(); current_signal.len() / 2];
-
-                        // Forward DWT on current signal
-                        self.execute_forward(&current_signal, &mut approx, &mut details)?;
-
-                        // Next level uses only the approximation
-                        current_signal = approx.to_vec();
-                    }
-
-                    Ok(Dwt {
-                        approximations: approx,
-                        details,
-                    })
-                }
-            }
-
-            fn multi_dwt(&self, signal: &[T], levels: usize) -> Result<MultiDwt<T>, OscletError> {
-                if levels == 0 || levels == 1 {
-                    let mut approx = try_vec![T::default(); signal.len().div_ceil(2)];
-                    let mut details = try_vec![T::default(); signal.len() / 2];
-
-                    self.execute_forward(signal, &mut approx, &mut details)?;
-
-                    Ok(MultiDwt {
-                        levels: vec![Dwt {
-                            approximations: approx,
-                            details,
-                        }],
-                    })
-                } else {
-                    let mut current_signal = signal.to_vec();
-                    let mut approx;
-                    let mut details;
-
-                    let mut levels_store = Vec::with_capacity(levels);
-
-                    for _ in 0..levels {
-                        if current_signal.len() < $min_taps {
-                            return Err(OscletError::BufferWasTooSmallForLevel);
-                        }
-
-                        approx = try_vec![T::default(); current_signal.len().div_ceil(2)];
-                        details = try_vec![T::default(); current_signal.len() / 2];
-
-                        // Forward DWT on current signal
-                        self.execute_forward(&current_signal, &mut approx, &mut details)?;
-
-                        // Next level uses only the approximation
-                        current_signal = approx.to_vec();
-
-                        levels_store.push(Dwt {
-                            approximations: approx,
-                            details,
-                        });
-                    }
-
-                    Ok(MultiDwt {
-                        levels: levels_store,
-                    })
-                }
-            }
-
-            fn idwt(&self, dwt: &Dwt<T>) -> Result<Vec<T>, OscletError> {
-                let mut output = try_vec![T::default(); dwt.details.len() + dwt.approximations.len()];
-
-                self.execute_inverse(&dwt.approximations, &dwt.details, &mut output)?;
-
-                Ok(output)
-            }
-        }
-
-    };
-}
-
-define_integer_cdf!(Cdf53Integer, 3);
-
-pub(crate) use define_integer_cdf;
+define_integer_cdf!(AvxCdf53Integer, 3);
 
 #[cfg(test)]
 mod tests {
@@ -408,7 +333,7 @@ mod tests {
 
     #[test]
     fn test_cdf53() {
-        let i16_cdf53 = Cdf53Integer::<i16, i32> {
+        let i16_cdf53 = AvxCdf53Integer::<i16, i32> {
             phantom0: Default::default(),
             phantom1: Default::default(),
         };
@@ -434,7 +359,7 @@ mod tests {
 
     #[test]
     fn test_cdf53_1() {
-        let i16_cdf53 = Cdf53Integer::<i16, i32> {
+        let i16_cdf53 = AvxCdf53Integer::<i16, i32> {
             phantom0: Default::default(),
             phantom1: Default::default(),
         };
@@ -460,7 +385,7 @@ mod tests {
 
     #[test]
     fn test_cdf53_2() {
-        let i16_cdf53 = Cdf53Integer::<i16, i32> {
+        let i16_cdf53 = AvxCdf53Integer::<i16, i32> {
             phantom0: Default::default(),
             phantom1: Default::default(),
         };

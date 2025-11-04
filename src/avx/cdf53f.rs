@@ -26,6 +26,8 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+use crate::avx::util::afmla;
+use crate::cdf53f::define_dwt_cdf_float;
 use crate::err::{OscletError, try_vec};
 use crate::{
     Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor, MultiDwt,
@@ -35,7 +37,7 @@ use std::marker::PhantomData;
 use std::ops::{Add, Mul, Sub};
 
 #[derive(Default)]
-pub(crate) struct Cdf53<T> {
+pub(crate) struct AvxCdf53<T> {
     phantom0: PhantomData<T>,
 }
 
@@ -47,13 +49,38 @@ impl<
         + Mul<T, Output = T>
         + Default
         + Sub<T, Output = T>,
-> DwtForwardExecutor<T> for Cdf53<T>
+> DwtForwardExecutor<T> for AvxCdf53<T>
 where
     f64: AsPrimitive<T>,
 {
     /// Perform the forward CDF 5/3 DWT (lifting scheme) on a 1D signal.
     /// Splits the signal into approximation (low-pass) and detail (high-pass) coefficients.
     fn execute_forward(
+        &self,
+        input: &[T],
+        approx: &mut [T],
+        details: &mut [T],
+    ) -> Result<(), OscletError> {
+        unsafe { self.execute_forward_impl(input, approx, details) }
+    }
+}
+
+impl<
+    T: Copy
+        + 'static
+        + MulAdd<T, Output = T>
+        + Add<T, Output = T>
+        + Mul<T, Output = T>
+        + Default
+        + Sub<T, Output = T>,
+> AvxCdf53<T>
+where
+    f64: AsPrimitive<T>,
+{
+    /// Perform the forward CDF 5/3 DWT (lifting scheme) on a 1D signal.
+    /// Splits the signal into approximation (low-pass) and detail (high-pass) coefficients.
+    #[target_feature(enable = "avx2", enable = "fma")]
+    fn execute_forward_impl(
         &self,
         input: &[T],
         approx: &mut [T],
@@ -70,7 +97,7 @@ where
             return Err(OscletError::ApproxSizeNotMatches(details.len(), n));
         }
 
-        details[0] = fmla(input[0] + input[1], (-0.5f64).as_(), input[0]);
+        details[0] = afmla(input[0] + input[1], (-0.5f64).as_(), input[0]);
 
         // Split into even (approx) and odd (detail)
         // Predict step: d[i] = odd - floor((even_left + even_right)/2)
@@ -85,14 +112,14 @@ where
         {
             let left = s_previous;
             let right = s_next;
-            *dst = fmla(left + right, (-0.5f64).as_(), s_current);
+            *dst = afmla(left + right, (-0.5f64).as_(), s_current);
         }
 
         // Handle last odd index if n is even (boundary)
         if n.is_multiple_of(2) {
             let i = n - 1;
             let left = input[i - 1];
-            *details.last_mut().unwrap() = fmla(left + left, (-0.5f64).as_(), input[i]);
+            *details.last_mut().unwrap() = afmla(left + left, (-0.5f64).as_(), input[i]);
         }
 
         for (dst, src) in approx.iter_mut().zip(input.iter().step_by(2)) {
@@ -100,7 +127,7 @@ where
         }
 
         // Update step: s[i] = even + floor((d_left + d_right + 2)/4)
-        approx[0] = fmla(details[0] + details[0], 0.25f64.as_(), approx[0]);
+        approx[0] = afmla(details[0] + details[0], 0.25f64.as_(), approx[0]);
 
         let details_next = &details[1..];
         let approx_len = approx.len();
@@ -113,14 +140,14 @@ where
         {
             let d_left = *detail;
             let d_right = *detail_next;
-            *dst = fmla(d_left + d_right, 0.25f64.as_(), *dst);
+            *dst = afmla(d_left + d_right, 0.25f64.as_(), *dst);
         }
 
         if approx.len() > 1 {
             let i = approx.len() - 1;
             let d_left = details[i - 1];
             let d_right = *details.last().unwrap();
-            approx[i] = fmla(d_left + d_right, 0.25f64.as_(), approx[i]);
+            approx[i] = afmla(d_left + d_right, 0.25f64.as_(), approx[i]);
         }
         Ok(())
     }
@@ -134,12 +161,36 @@ impl<
         + Mul<T, Output = T>
         + Default
         + Sub<T, Output = T>,
-> DwtInverseExecutor<T> for Cdf53<T>
+> DwtInverseExecutor<T> for AvxCdf53<T>
 where
     f64: AsPrimitive<T>,
 {
     /// Perform the inverse CDF 5/3 DWT (lifting scheme) to reconstruct the original signal.
     fn execute_inverse(
+        &self,
+        approx: &[T],
+        details: &[T],
+        output: &mut [T],
+    ) -> Result<(), OscletError> {
+        unsafe { self.execute_inverse_impl(approx, details, output) }
+    }
+}
+
+impl<
+    T: Copy
+        + 'static
+        + MulAdd<T, Output = T>
+        + Add<T, Output = T>
+        + Mul<T, Output = T>
+        + Default
+        + Sub<T, Output = T>,
+> AvxCdf53<T>
+where
+    f64: AsPrimitive<T>,
+{
+    /// Perform the inverse CDF 5/3 DWT (lifting scheme) to reconstruct the original signal.
+    #[target_feature(enable = "avx2", enable = "fma")]
+    fn execute_inverse_impl(
         &self,
         approx: &[T],
         details: &[T],
@@ -155,7 +206,7 @@ where
 
         // Inverse update step: s[i] = even - floor((d_left + d_right + 2)/4)
         let mut approx_inv = approx.to_vec();
-        approx_inv[0] = fmla(details[0] + details[0], (-0.25f64).as_(), approx_inv[0]);
+        approx_inv[0] = afmla(details[0] + details[0], (-0.25f64).as_(), approx_inv[0]);
         let approx_k = &mut approx_inv[1..];
         let detail_next = &details[1..];
 
@@ -168,7 +219,7 @@ where
         {
             let d_left = *detail;
             let d_right = *detail_next;
-            *dst = fmla(d_left + d_right, (-0.25f64).as_(), *dst);
+            *dst = afmla(d_left + d_right, (-0.25f64).as_(), *dst);
             iters += 1;
         }
 
@@ -180,7 +231,7 @@ where
             } else {
                 details[details.len() - 1]
             };
-            approx_inv[i] = fmla(d_left + d_right, (-0.25f64).as_(), approx_inv[i]);
+            approx_inv[i] = afmla(d_left + d_right, (-0.25f64).as_(), approx_inv[i]);
         }
 
         // Inverse predict step: odd = detail + floor((even_left + even_right)/2)
@@ -195,7 +246,7 @@ where
         {
             let left = current;
             let right = next;
-            *dst = fmla(left + right, 0.5f64.as_(), detail);
+            *dst = afmla(left + right, 0.5f64.as_(), detail);
         }
 
         if !details.is_empty() {
@@ -206,7 +257,7 @@ where
             } else {
                 left
             };
-            odd_values[i] = fmla(left + right, 0.5f64.as_(), details[i]);
+            odd_values[i] = afmla(left + right, 0.5f64.as_(), details[i]);
         }
 
         // Interleave even and odd
@@ -238,7 +289,7 @@ impl<
         + Sub<T, Output = T>
         + Send
         + Sync,
-> IncompleteDwtExecutor<T> for Cdf53<T>
+> IncompleteDwtExecutor<T> for AvxCdf53<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -247,125 +298,7 @@ where
     }
 }
 
-macro_rules! define_dwt_cdf_float {
-    ($for_clazz: ident, $min_size: expr) => {
-        impl<
-            T: Copy
-                + 'static
-                + MulAdd<T, Output = T>
-                + Add<T, Output = T>
-                + Mul<T, Output = T>
-                + Default
-                + Sub<T, Output = T>
-                + Send
-                + Sync,
-        > DwtExecutor<T> for $for_clazz<T>
-        where
-            f64: AsPrimitive<T>,
-        {
-            fn dwt(&self, signal: &[T], level: usize) -> Result<Dwt<T>, OscletError> {
-                if signal.len() < $min_size {
-                    return Err(OscletError::BufferWasTooSmallForLevel);
-                }
-                if level == 0 || level == 1 {
-                    let mut approx = try_vec![T::default(); signal.len().div_ceil(2)];
-                    let mut details = try_vec![T::default(); signal.len() / 2];
-
-                    self.execute_forward(signal, &mut approx, &mut details)?;
-
-                    Ok(Dwt {
-                        approximations: approx,
-                        details,
-                    })
-                } else {
-                    let mut current_signal = signal.to_vec();
-                    let mut approx = vec![];
-                    let mut details = vec![];
-
-                    for _ in 0..level {
-                        if current_signal.len() < $min_size {
-                            return Err(OscletError::BufferWasTooSmallForLevel);
-                        }
-
-                        approx = try_vec![T::default(); current_signal.len().div_ceil(2)];
-                        details = try_vec![T::default(); current_signal.len() / 2];
-
-                        // Forward DWT on current signal
-                        self.execute_forward(&current_signal, &mut approx, &mut details)?;
-
-                        // Next level uses only the approximation
-                        current_signal = approx.to_vec();
-                    }
-
-                    Ok(Dwt {
-                        approximations: approx,
-                        details,
-                    })
-                }
-            }
-
-            fn multi_dwt(&self, signal: &[T], levels: usize) -> Result<MultiDwt<T>, OscletError> {
-                if signal.len() < $min_size {
-                    return Err(OscletError::BufferWasTooSmallForLevel);
-                }
-                if levels == 0 || levels == 1 {
-                    let mut approx = try_vec![T::default(); signal.len().div_ceil(2)];
-                    let mut details = try_vec![T::default(); signal.len() / 2];
-
-                    self.execute_forward(signal, &mut approx, &mut details)?;
-
-                    Ok(MultiDwt {
-                        levels: vec![Dwt {
-                            approximations: approx,
-                            details,
-                        }],
-                    })
-                } else {
-                    let mut current_signal = signal.to_vec();
-                    let mut approx;
-                    let mut details;
-
-                    let mut levels_store = Vec::with_capacity(levels);
-
-                    for _ in 0..levels {
-                        if current_signal.len() < $min_size {
-                            return Err(OscletError::BufferWasTooSmallForLevel);
-                        }
-
-                        approx = try_vec![T::default(); current_signal.len().div_ceil(2)];
-                        details = try_vec![T::default(); current_signal.len() / 2];
-
-                        // Forward DWT on current signal
-                        self.execute_forward(&current_signal, &mut approx, &mut details)?;
-
-                        // Next level uses only the approximation
-                        current_signal = approx.to_vec();
-
-                        levels_store.push(Dwt {
-                            approximations: approx,
-                            details,
-                        });
-                    }
-
-                    Ok(MultiDwt {
-                        levels: levels_store,
-                    })
-                }
-            }
-
-            fn idwt(&self, dwt: &Dwt<T>) -> Result<Vec<T>, OscletError> {
-                let mut output = try_vec![T::default(); dwt.details.len() + dwt.approximations.len()];
-                self.execute_inverse(&dwt.approximations, &dwt.details, &mut output)?;
-                Ok(output)
-            }
-        }
-    };
-}
-
-use crate::mla::fmla;
-pub(crate) use define_dwt_cdf_float;
-
-define_dwt_cdf_float!(Cdf53, 3);
+define_dwt_cdf_float!(AvxCdf53, 3);
 
 #[cfg(test)]
 mod tests {
@@ -373,7 +306,7 @@ mod tests {
 
     #[test]
     fn test_cdf53() {
-        let i16_cdf53 = Cdf53::<f32> {
+        let i16_cdf53 = AvxCdf53::<f32> {
             phantom0: Default::default(),
         };
         let o_signal = vec![
@@ -403,7 +336,7 @@ mod tests {
 
     #[test]
     fn test_cdf53_1() {
-        let i16_cdf53 = Cdf53::<f32> {
+        let i16_cdf53 = AvxCdf53::<f32> {
             phantom0: Default::default(),
         };
         let o_signal = vec![
@@ -433,7 +366,7 @@ mod tests {
 
     #[test]
     fn test_cdf53_2() {
-        let i16_cdf53 = Cdf53::<f32> {
+        let i16_cdf53 = AvxCdf53::<f32> {
             phantom0: Default::default(),
         };
         let o_signal = vec![

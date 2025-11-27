@@ -2,7 +2,7 @@
 
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
-use osclet::{BorderMode, Osclet, WaveletFilterProvider};
+use osclet::Osclet;
 
 #[derive(Arbitrary, Debug)]
 struct Data {

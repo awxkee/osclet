@@ -4,6 +4,7 @@ use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
 use osclet::{BorderMode, Osclet, WaveletFilterProvider};
 use std::borrow::Cow;
+use std::sync::Arc;
 
 #[derive(Arbitrary, Debug)]
 struct Data {
@@ -37,7 +38,7 @@ fuzz_target!(|data: Data| {
         signal[i] = i as f32 / data.length as f32;
     }
     let executor =
-        Osclet::make_modwt_f32(Box::new(WaveletProvider { wavelet }), BorderMode::Wrap).unwrap();
+        Osclet::make_modwt_f32(Arc::new(WaveletProvider { wavelet }), BorderMode::Wrap).unwrap();
     let dwt = executor.modwt(&signal, 1).unwrap();
     _ = executor.imodwt(&dwt, 1).unwrap();
 });

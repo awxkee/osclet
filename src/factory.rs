@@ -27,6 +27,7 @@
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use crate::{BorderMode, IncompleteDwtExecutor};
+use std::sync::Arc;
 
 #[inline]
 #[cfg(all(target_arch = "x86_64", feature = "avx"))]
@@ -38,192 +39,192 @@ pub(crate) trait DwtFactory<T> {
     fn wavelet_2_taps(
         border_mode: BorderMode,
         dwt: &[T; 2],
-    ) -> Box<dyn IncompleteDwtExecutor<T> + Send + Sync>;
+    ) -> Arc<dyn IncompleteDwtExecutor<T> + Send + Sync>;
     fn wavelet_4_taps(
         border_mode: BorderMode,
         dwt: &[T; 4],
-    ) -> Box<dyn IncompleteDwtExecutor<T> + Send + Sync>;
+    ) -> Arc<dyn IncompleteDwtExecutor<T> + Send + Sync>;
     fn wavelet_6_taps(
         border_mode: BorderMode,
         dwt: &[T; 6],
-    ) -> Box<dyn IncompleteDwtExecutor<T> + Send + Sync>;
+    ) -> Arc<dyn IncompleteDwtExecutor<T> + Send + Sync>;
     fn wavelet_8_taps(
         border_mode: BorderMode,
         dwt: &[T; 8],
-    ) -> Box<dyn IncompleteDwtExecutor<T> + Send + Sync>;
+    ) -> Arc<dyn IncompleteDwtExecutor<T> + Send + Sync>;
     fn wavelet_10_taps(
         border_mode: BorderMode,
         dwt: &[T; 10],
-    ) -> Box<dyn IncompleteDwtExecutor<T> + Send + Sync>;
+    ) -> Arc<dyn IncompleteDwtExecutor<T> + Send + Sync>;
     fn wavelet_12_taps(
         border_mode: BorderMode,
         dwt: &[T; 12],
-    ) -> Box<dyn IncompleteDwtExecutor<T> + Send + Sync>;
+    ) -> Arc<dyn IncompleteDwtExecutor<T> + Send + Sync>;
     fn wavelet_n_taps(
         border_mode: BorderMode,
         dwt: &[T],
-    ) -> Box<dyn IncompleteDwtExecutor<T> + Send + Sync>;
+    ) -> Arc<dyn IncompleteDwtExecutor<T> + Send + Sync>;
 }
 
 impl DwtFactory<f32> for f32 {
     fn wavelet_2_taps(
         border_mode: BorderMode,
         dwt: &[f32; 2],
-    ) -> Box<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
+    ) -> Arc<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
         #[cfg(all(target_arch = "aarch64", feature = "neon"))]
         {
             use crate::neon::NeonWavelet2TapsF32;
-            Box::new(NeonWavelet2TapsF32::new(border_mode, dwt))
+            Arc::new(NeonWavelet2TapsF32::new(border_mode, dwt))
         }
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet2TapsF32;
-                return Box::new(AvxWavelet2TapsF32::new(border_mode, dwt));
+                return Arc::new(AvxWavelet2TapsF32::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet2taps::Wavelet2Taps;
-            Box::new(Wavelet2Taps::new(border_mode, dwt))
+            Arc::new(Wavelet2Taps::new(border_mode, dwt))
         }
     }
 
     fn wavelet_4_taps(
         border_mode: BorderMode,
         dwt: &[f32; 4],
-    ) -> Box<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
+    ) -> Arc<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
         #[cfg(all(target_arch = "aarch64", feature = "neon"))]
         {
             use crate::neon::NeonWavelet4TapsF32;
-            Box::new(NeonWavelet4TapsF32::new(border_mode, dwt))
+            Arc::new(NeonWavelet4TapsF32::new(border_mode, dwt))
         }
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet4TapsF32;
-                return Box::new(AvxWavelet4TapsF32::new(border_mode, dwt));
+                return Arc::new(AvxWavelet4TapsF32::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet4taps::Wavelet4Taps;
-            Box::new(Wavelet4Taps::new(border_mode, dwt))
+            Arc::new(Wavelet4Taps::new(border_mode, dwt))
         }
     }
 
     fn wavelet_6_taps(
         border_mode: BorderMode,
         dwt: &[f32; 6],
-    ) -> Box<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
+    ) -> Arc<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
         #[cfg(all(target_arch = "aarch64", feature = "neon"))]
         {
             use crate::neon::NeonWavelet6TapsF32;
-            Box::new(NeonWavelet6TapsF32::new(border_mode, dwt))
+            Arc::new(NeonWavelet6TapsF32::new(border_mode, dwt))
         }
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet6TapsF32;
-                return Box::new(AvxWavelet6TapsF32::new(border_mode, dwt));
+                return Arc::new(AvxWavelet6TapsF32::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet6taps::Wavelet6Taps;
-            Box::new(Wavelet6Taps::new(border_mode, dwt))
+            Arc::new(Wavelet6Taps::new(border_mode, dwt))
         }
     }
 
     fn wavelet_8_taps(
         border_mode: BorderMode,
         dwt: &[f32; 8],
-    ) -> Box<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
+    ) -> Arc<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
         #[cfg(all(target_arch = "aarch64", feature = "neon"))]
         {
             use crate::neon::NeonWavelet8TapsF32;
-            Box::new(NeonWavelet8TapsF32::new(border_mode, dwt))
+            Arc::new(NeonWavelet8TapsF32::new(border_mode, dwt))
         }
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet8TapsF32;
-                return Box::new(AvxWavelet8TapsF32::new(border_mode, dwt));
+                return Arc::new(AvxWavelet8TapsF32::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet8taps::Wavelet8Taps;
-            Box::new(Wavelet8Taps::new(border_mode, dwt))
+            Arc::new(Wavelet8Taps::new(border_mode, dwt))
         }
     }
 
     fn wavelet_10_taps(
         border_mode: BorderMode,
         dwt: &[f32; 10],
-    ) -> Box<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
+    ) -> Arc<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
         #[cfg(all(target_arch = "aarch64", feature = "neon"))]
         {
             use crate::neon::NeonWavelet10TapsF32;
-            Box::new(NeonWavelet10TapsF32::new(border_mode, dwt))
+            Arc::new(NeonWavelet10TapsF32::new(border_mode, dwt))
         }
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet10TapsF32;
-                return Box::new(AvxWavelet10TapsF32::new(border_mode, dwt));
+                return Arc::new(AvxWavelet10TapsF32::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet10taps::Wavelet10Taps;
-            Box::new(Wavelet10Taps::new(border_mode, dwt))
+            Arc::new(Wavelet10Taps::new(border_mode, dwt))
         }
     }
 
     fn wavelet_12_taps(
         border_mode: BorderMode,
         dwt: &[f32; 12],
-    ) -> Box<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
+    ) -> Arc<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
         #[cfg(all(target_arch = "aarch64", feature = "neon"))]
         {
             use crate::neon::NeonWavelet12TapsF32;
-            Box::new(NeonWavelet12TapsF32::new(border_mode, dwt))
+            Arc::new(NeonWavelet12TapsF32::new(border_mode, dwt))
         }
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet12TapsF32;
-                return Box::new(AvxWavelet12TapsF32::new(border_mode, dwt));
+                return Arc::new(AvxWavelet12TapsF32::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet12taps::Wavelet12Taps;
-            Box::new(Wavelet12Taps::new(border_mode, dwt))
+            Arc::new(Wavelet12Taps::new(border_mode, dwt))
         }
     }
 
     fn wavelet_n_taps(
         border_mode: BorderMode,
         dwt: &[f32],
-    ) -> Box<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
+    ) -> Arc<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
         #[cfg(all(target_arch = "aarch64", feature = "neon"))]
         {
             use crate::neon::NeonWaveletNTapsF32;
-            Box::new(NeonWaveletNTapsF32::new(border_mode, dwt))
+            Arc::new(NeonWaveletNTapsF32::new(border_mode, dwt))
         }
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             if has_valid_avx() {
                 use crate::avx::AvxWaveletNTapsF32;
-                return Box::new(AvxWaveletNTapsF32::new(border_mode, dwt));
+                return Arc::new(AvxWaveletNTapsF32::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet_n_taps::WaveletNTaps;
-            Box::new(WaveletNTaps::new(border_mode, dwt))
+            Arc::new(WaveletNTaps::new(border_mode, dwt))
         }
     }
 }
@@ -232,161 +233,161 @@ impl DwtFactory<f64> for f64 {
     fn wavelet_2_taps(
         border_mode: BorderMode,
         dwt: &[f64; 2],
-    ) -> Box<dyn IncompleteDwtExecutor<f64> + Send + Sync> {
+    ) -> Arc<dyn IncompleteDwtExecutor<f64> + Send + Sync> {
         #[cfg(all(target_arch = "aarch64", feature = "neon"))]
         {
             use crate::neon::NeonWavelet2TapsF64;
-            Box::new(NeonWavelet2TapsF64::new(border_mode, dwt))
+            Arc::new(NeonWavelet2TapsF64::new(border_mode, dwt))
         }
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet2TapsF64;
-                return Box::new(AvxWavelet2TapsF64::new(border_mode, dwt));
+                return Arc::new(AvxWavelet2TapsF64::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet2taps::Wavelet2Taps;
-            Box::new(Wavelet2Taps::new(border_mode, dwt))
+            Arc::new(Wavelet2Taps::new(border_mode, dwt))
         }
     }
 
     fn wavelet_4_taps(
         border_mode: BorderMode,
         dwt: &[f64; 4],
-    ) -> Box<dyn IncompleteDwtExecutor<f64> + Send + Sync> {
+    ) -> Arc<dyn IncompleteDwtExecutor<f64> + Send + Sync> {
         #[cfg(all(target_arch = "aarch64", feature = "neon"))]
         {
             use crate::neon::NeonWavelet4TapsF64;
-            Box::new(NeonWavelet4TapsF64::new(border_mode, dwt))
+            Arc::new(NeonWavelet4TapsF64::new(border_mode, dwt))
         }
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet4TapsF64;
-                return Box::new(AvxWavelet4TapsF64::new(border_mode, dwt));
+                return Arc::new(AvxWavelet4TapsF64::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet4taps::Wavelet4Taps;
-            Box::new(Wavelet4Taps::new(border_mode, dwt))
+            Arc::new(Wavelet4Taps::new(border_mode, dwt))
         }
     }
 
     fn wavelet_6_taps(
         border_mode: BorderMode,
         dwt: &[f64; 6],
-    ) -> Box<dyn IncompleteDwtExecutor<f64> + Send + Sync> {
+    ) -> Arc<dyn IncompleteDwtExecutor<f64> + Send + Sync> {
         #[cfg(all(target_arch = "aarch64", feature = "neon"))]
         {
             use crate::neon::NeonWavelet6TapsF64;
-            Box::new(NeonWavelet6TapsF64::new(border_mode, dwt))
+            Arc::new(NeonWavelet6TapsF64::new(border_mode, dwt))
         }
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet6TapsF64;
-                return Box::new(AvxWavelet6TapsF64::new(border_mode, dwt));
+                return Arc::new(AvxWavelet6TapsF64::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet6taps::Wavelet6Taps;
-            Box::new(Wavelet6Taps::new(border_mode, dwt))
+            Arc::new(Wavelet6Taps::new(border_mode, dwt))
         }
     }
 
     fn wavelet_8_taps(
         border_mode: BorderMode,
         dwt: &[f64; 8],
-    ) -> Box<dyn IncompleteDwtExecutor<f64> + Send + Sync> {
+    ) -> Arc<dyn IncompleteDwtExecutor<f64> + Send + Sync> {
         #[cfg(all(target_arch = "aarch64", feature = "neon"))]
         {
             use crate::neon::NeonWavelet8TapsF64;
-            Box::new(NeonWavelet8TapsF64::new(border_mode, dwt))
+            Arc::new(NeonWavelet8TapsF64::new(border_mode, dwt))
         }
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet8TapsF64;
-                return Box::new(AvxWavelet8TapsF64::new(border_mode, dwt));
+                return Arc::new(AvxWavelet8TapsF64::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet8taps::Wavelet8Taps;
-            Box::new(Wavelet8Taps::new(border_mode, dwt))
+            Arc::new(Wavelet8Taps::new(border_mode, dwt))
         }
     }
 
     fn wavelet_10_taps(
         border_mode: BorderMode,
         dwt: &[f64; 10],
-    ) -> Box<dyn IncompleteDwtExecutor<f64> + Send + Sync> {
+    ) -> Arc<dyn IncompleteDwtExecutor<f64> + Send + Sync> {
         #[cfg(all(target_arch = "aarch64", feature = "neon"))]
         {
             use crate::neon::NeonWavelet10TapsF64;
-            Box::new(NeonWavelet10TapsF64::new(border_mode, dwt))
+            Arc::new(NeonWavelet10TapsF64::new(border_mode, dwt))
         }
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet10TapsF64;
-                return Box::new(AvxWavelet10TapsF64::new(border_mode, dwt));
+                return Arc::new(AvxWavelet10TapsF64::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet10taps::Wavelet10Taps;
-            Box::new(Wavelet10Taps::new(border_mode, dwt))
+            Arc::new(Wavelet10Taps::new(border_mode, dwt))
         }
     }
 
     fn wavelet_12_taps(
         border_mode: BorderMode,
         dwt: &[f64; 12],
-    ) -> Box<dyn IncompleteDwtExecutor<f64> + Send + Sync> {
+    ) -> Arc<dyn IncompleteDwtExecutor<f64> + Send + Sync> {
         #[cfg(all(target_arch = "aarch64", feature = "neon"))]
         {
             use crate::neon::NeonWavelet12TapsF64;
-            Box::new(NeonWavelet12TapsF64::new(border_mode, dwt))
+            Arc::new(NeonWavelet12TapsF64::new(border_mode, dwt))
         }
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet12TapsF64;
-                return Box::new(AvxWavelet12TapsF64::new(border_mode, dwt));
+                return Arc::new(AvxWavelet12TapsF64::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet12taps::Wavelet12Taps;
-            Box::new(Wavelet12Taps::new(border_mode, dwt))
+            Arc::new(Wavelet12Taps::new(border_mode, dwt))
         }
     }
 
     fn wavelet_n_taps(
         border_mode: BorderMode,
         dwt: &[f64],
-    ) -> Box<dyn IncompleteDwtExecutor<f64> + Send + Sync> {
+    ) -> Arc<dyn IncompleteDwtExecutor<f64> + Send + Sync> {
         #[cfg(all(target_arch = "aarch64", feature = "neon"))]
         {
             use crate::neon::NeonWaveletNTapsF64;
-            Box::new(NeonWaveletNTapsF64::new(border_mode, dwt))
+            Arc::new(NeonWaveletNTapsF64::new(border_mode, dwt))
         }
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             if has_valid_avx() {
                 use crate::avx::AvxWaveletNTapsF64;
-                return Box::new(AvxWaveletNTapsF64::new(border_mode, dwt));
+                return Arc::new(AvxWaveletNTapsF64::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet_n_taps::WaveletNTaps;
-            Box::new(WaveletNTaps::new(border_mode, dwt))
+            Arc::new(WaveletNTaps::new(border_mode, dwt))
         }
     }
 }

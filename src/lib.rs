@@ -31,6 +31,7 @@
 use num_traits::{AsPrimitive, MulAdd};
 use std::fmt::Debug;
 use std::ops::{Add, Mul, Neg};
+use std::sync::Arc;
 
 #[cfg(all(target_arch = "x86_64", feature = "avx"))]
 mod avx;
@@ -205,7 +206,7 @@ impl Osclet {
     fn default_factory<T: DwtFactory<T> + 'static + Copy, W: WaveletFilterProvider<T>>(
         border_mode: BorderMode,
         db: W,
-    ) -> Box<dyn IncompleteDwtExecutor<T> + Send + Sync>
+    ) -> Arc<dyn IncompleteDwtExecutor<T> + Send + Sync>
     where
         f64: AsPrimitive<T>,
     {
@@ -227,8 +228,8 @@ impl Osclet {
     /// or a generic N-tap constructor otherwise.
     fn default_factory_dyn<T: DwtFactory<T> + 'static + Copy>(
         border_mode: BorderMode,
-        db: Box<dyn WaveletFilterProvider<T> + Send + Sync>,
-    ) -> Box<dyn IncompleteDwtExecutor<T> + Send + Sync>
+        db: Arc<dyn WaveletFilterProvider<T> + Send + Sync>,
+    ) -> Arc<dyn IncompleteDwtExecutor<T> + Send + Sync>
     where
         f64: AsPrimitive<T>,
     {
@@ -258,12 +259,12 @@ impl Osclet {
     >(
         db: DaubechiesFamily,
         border_mode: BorderMode,
-    ) -> Box<dyn DwtExecutor<T> + Send + Sync>
+    ) -> Arc<dyn DwtExecutor<T> + Send + Sync>
     where
         f64: AsPrimitive<T>,
     {
         let intercept = Self::default_factory(border_mode, db);
-        Box::new(CompletedDwtExecutor::new(intercept))
+        Arc::new(CompletedDwtExecutor::new(intercept))
     }
 
     /// Internal implementation for creating a Coiflet wavelet executor.
@@ -280,12 +281,12 @@ impl Osclet {
     >(
         coif: CoifletFamily,
         border_mode: BorderMode,
-    ) -> Box<dyn DwtExecutor<T> + Send + Sync>
+    ) -> Arc<dyn DwtExecutor<T> + Send + Sync>
     where
         f64: AsPrimitive<T>,
     {
         let intercept = Self::default_factory(border_mode, coif);
-        Box::new(CompletedDwtExecutor::new(intercept))
+        Arc::new(CompletedDwtExecutor::new(intercept))
     }
 
     /// Internal implementation for creating a Biorthogonal wavelet executor.
@@ -302,12 +303,12 @@ impl Osclet {
     >(
         biorthogonal: BiorthogonalFamily,
         border_mode: BorderMode,
-    ) -> Box<dyn DwtExecutor<T> + Send + Sync>
+    ) -> Arc<dyn DwtExecutor<T> + Send + Sync>
     where
         f64: AsPrimitive<T>,
     {
         let intercept = Self::default_factory(border_mode, biorthogonal);
-        Box::new(CompletedDwtExecutor::new(intercept))
+        Arc::new(CompletedDwtExecutor::new(intercept))
     }
 
     /// Internal implementation for creating a Symlet wavelet executor.
@@ -324,12 +325,12 @@ impl Osclet {
     >(
         sym: SymletFamily,
         border_mode: BorderMode,
-    ) -> Box<dyn DwtExecutor<T> + Send + Sync>
+    ) -> Arc<dyn DwtExecutor<T> + Send + Sync>
     where
         f64: AsPrimitive<T>,
     {
         let intercept = Self::default_factory(border_mode, sym);
-        Box::new(CompletedDwtExecutor::new(intercept))
+        Arc::new(CompletedDwtExecutor::new(intercept))
     }
 
     /// Internal implementation for creating a MODWT executor.
@@ -355,9 +356,9 @@ impl Osclet {
             + Sqrt2Provider<T>
             + Debug,
     >(
-        provider: Box<dyn WaveletFilterProvider<T> + Send + Sync>,
+        provider: Arc<dyn WaveletFilterProvider<T> + Send + Sync>,
         border_mode: BorderMode,
-    ) -> Result<Box<dyn MoDwtExecutor<T> + Send + Sync>, OscletError>
+    ) -> Result<Arc<dyn MoDwtExecutor<T> + Send + Sync>, OscletError>
     where
         f64: AsPrimitive<T>,
     {
@@ -365,7 +366,7 @@ impl Osclet {
         if wave.is_empty() || wave.len() % 2 != 0 {
             return Err(OscletError::ZeroOrOddSizedWavelet);
         }
-        Ok(Box::new(MoDwtHandler::new(
+        Ok(Arc::new(MoDwtHandler::new(
             fill_wavelet(&wave)?,
             T::make_convolution_1d(border_mode),
         )))
@@ -382,7 +383,7 @@ impl Osclet {
     pub fn make_daubechies_f32(
         db: DaubechiesFamily,
         border_mode: BorderMode,
-    ) -> Box<dyn DwtExecutor<f32> + Send + Sync> {
+    ) -> Arc<dyn DwtExecutor<f32> + Send + Sync> {
         Self::make_daubechies_impl(db, border_mode)
     }
 
@@ -392,7 +393,7 @@ impl Osclet {
     pub fn make_daubechies_f64(
         db: DaubechiesFamily,
         border_mode: BorderMode,
-    ) -> Box<dyn DwtExecutor<f64> + Send + Sync> {
+    ) -> Arc<dyn DwtExecutor<f64> + Send + Sync> {
         Self::make_daubechies_impl(db, border_mode)
     }
 
@@ -407,7 +408,7 @@ impl Osclet {
     pub fn make_coiflet_f32(
         coif: CoifletFamily,
         border_mode: BorderMode,
-    ) -> Box<dyn DwtExecutor<f32> + Send + Sync> {
+    ) -> Arc<dyn DwtExecutor<f32> + Send + Sync> {
         Self::make_coiflet_impl(coif, border_mode)
     }
 
@@ -417,7 +418,7 @@ impl Osclet {
     pub fn make_coiflet_f64(
         coif: CoifletFamily,
         border_mode: BorderMode,
-    ) -> Box<dyn DwtExecutor<f64> + Send + Sync> {
+    ) -> Arc<dyn DwtExecutor<f64> + Send + Sync> {
         Self::make_coiflet_impl(coif, border_mode)
     }
 
@@ -432,7 +433,7 @@ impl Osclet {
     pub fn make_biorthogonal_f32(
         biorthogonal: BiorthogonalFamily,
         border_mode: BorderMode,
-    ) -> Box<dyn DwtExecutor<f32> + Send + Sync> {
+    ) -> Arc<dyn DwtExecutor<f32> + Send + Sync> {
         Self::make_biorthogonal_impl(biorthogonal, border_mode)
     }
 
@@ -446,7 +447,7 @@ impl Osclet {
     pub fn make_biorthogonal_f64(
         biorthogonal: BiorthogonalFamily,
         border_mode: BorderMode,
-    ) -> Box<dyn DwtExecutor<f64> + Send + Sync> {
+    ) -> Arc<dyn DwtExecutor<f64> + Send + Sync> {
         Self::make_biorthogonal_impl(biorthogonal, border_mode)
     }
 
@@ -461,7 +462,7 @@ impl Osclet {
     pub fn make_symlet_f32(
         sym: SymletFamily,
         border_mode: BorderMode,
-    ) -> Box<dyn DwtExecutor<f32> + Send + Sync> {
+    ) -> Arc<dyn DwtExecutor<f32> + Send + Sync> {
         Self::make_symlet_impl(sym, border_mode)
     }
 
@@ -471,7 +472,7 @@ impl Osclet {
     pub fn make_symlet_f64(
         sym: SymletFamily,
         border_mode: BorderMode,
-    ) -> Box<dyn DwtExecutor<f64> + Send + Sync> {
+    ) -> Arc<dyn DwtExecutor<f64> + Send + Sync> {
         Self::make_symlet_impl(sym, border_mode)
     }
 
@@ -484,9 +485,9 @@ impl Osclet {
     /// # Returns
     /// A `Result` containing a boxed `MoDwtExecutor<f32>` if successful, or an `OscletError`.
     pub fn make_modwt_f32(
-        provider: Box<dyn WaveletFilterProvider<f32> + Send + Sync>,
+        provider: Arc<dyn WaveletFilterProvider<f32> + Send + Sync>,
         border_mode: BorderMode,
-    ) -> Result<Box<dyn MoDwtExecutor<f32> + Send + Sync>, OscletError> {
+    ) -> Result<Arc<dyn MoDwtExecutor<f32> + Send + Sync>, OscletError> {
         Self::make_modwt(provider, border_mode)
     }
 
@@ -494,9 +495,9 @@ impl Osclet {
     ///
     /// Same as `make_modwt_f32`, but for double-precision signals.
     pub fn make_modwt_f64(
-        provider: Box<dyn WaveletFilterProvider<f64> + Send + Sync>,
+        provider: Arc<dyn WaveletFilterProvider<f64> + Send + Sync>,
         border_mode: BorderMode,
-    ) -> Result<Box<dyn MoDwtExecutor<f64> + Send + Sync>, OscletError> {
+    ) -> Result<Arc<dyn MoDwtExecutor<f64> + Send + Sync>, OscletError> {
         Self::make_modwt(provider, border_mode)
     }
 
@@ -509,14 +510,14 @@ impl Osclet {
     /// # Returns
     /// A boxed `DwtExecutor<f32>` that can perform discrete wavelet transforms.
     pub fn make_custom_f32(
-        provider: Box<dyn WaveletFilterProvider<f32> + Send + Sync>,
+        provider: Arc<dyn WaveletFilterProvider<f32> + Send + Sync>,
         border_mode: BorderMode,
-    ) -> Result<Box<dyn DwtExecutor<f32> + Send + Sync>, OscletError> {
+    ) -> Result<Arc<dyn DwtExecutor<f32> + Send + Sync>, OscletError> {
         let let_length = provider.get_wavelet().len();
         if let_length == 0 || !let_length.is_multiple_of(2) {
             return Err(OscletError::ZeroOrOddSizedWavelet);
         }
-        Ok(Box::new(CompletedDwtExecutor::new(
+        Ok(Arc::new(CompletedDwtExecutor::new(
             Self::default_factory_dyn(border_mode, provider),
         )))
     }
@@ -530,14 +531,14 @@ impl Osclet {
     /// # Returns
     /// A boxed `DwtExecutor<f32>` that can perform discrete wavelet transforms.
     pub fn make_custom_f64(
-        provider: Box<dyn WaveletFilterProvider<f64> + Send + Sync>,
+        provider: Arc<dyn WaveletFilterProvider<f64> + Send + Sync>,
         border_mode: BorderMode,
-    ) -> Result<Box<dyn DwtExecutor<f64> + Send + Sync>, OscletError> {
+    ) -> Result<Arc<dyn DwtExecutor<f64> + Send + Sync>, OscletError> {
         let let_length = provider.get_wavelet().len();
         if let_length == 0 || !let_length.is_multiple_of(2) {
             return Err(OscletError::ZeroOrOddSizedWavelet);
         }
-        Ok(Box::new(CompletedDwtExecutor::new(
+        Ok(Arc::new(CompletedDwtExecutor::new(
             Self::default_factory_dyn(border_mode, provider),
         )))
     }
@@ -570,16 +571,16 @@ impl Osclet {
     ///
     /// A boxed [`DwtExecutor`] trait object implementing the CDF 5/3 integer
     /// forward and inverse transform for `i16` samples.
-    pub fn make_cdf53_i16() -> Box<dyn DwtExecutor<i16> + Send + Sync> {
+    pub fn make_cdf53_i16() -> Arc<dyn DwtExecutor<i16> + Send + Sync> {
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             use crate::factory::has_valid_avx;
             if has_valid_avx() {
                 use crate::avx::AvxCdf53Integer;
-                return Box::new(AvxCdf53Integer::<i16, i32>::default());
+                return Arc::new(AvxCdf53Integer::<i16, i32>::default());
             }
         }
-        Box::new(Cdf53Integer::<i16, i32>::default())
+        Arc::new(Cdf53Integer::<i16, i32>::default())
     }
 
     /// Creates a CDF 5/3 (LeGall 5/3) Discrete Wavelet Transform (DWT) executor
@@ -600,16 +601,16 @@ impl Osclet {
     ///
     /// A boxed [`DwtExecutor`] trait object implementing the CDF 5/3 integer
     /// forward and inverse transform for `i32` samples.
-    pub fn make_cdf53_i32() -> Box<dyn DwtExecutor<i32> + Send + Sync> {
+    pub fn make_cdf53_i32() -> Arc<dyn DwtExecutor<i32> + Send + Sync> {
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             use crate::factory::has_valid_avx;
             if has_valid_avx() {
                 use crate::avx::AvxCdf53Integer;
-                return Box::new(AvxCdf53Integer::<i32, i32>::default());
+                return Arc::new(AvxCdf53Integer::<i32, i32>::default());
             }
         }
-        Box::new(Cdf53Integer::<i32, i32>::default())
+        Arc::new(Cdf53Integer::<i32, i32>::default())
     }
 
     /// Creates a new **CDF 5/3 (LeGall)** discrete wavelet transform executor for `f32` signals.
@@ -627,16 +628,16 @@ impl Osclet {
     /// # Returns
     /// A boxed dynamic trait object implementing [`DwtExecutor<f32>`],
     /// capable of performing both forward and inverse transforms.
-    pub fn make_cdf53_f32() -> Box<dyn DwtExecutor<f32> + Send + Sync> {
+    pub fn make_cdf53_f32() -> Arc<dyn DwtExecutor<f32> + Send + Sync> {
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             use crate::factory::has_valid_avx;
             if has_valid_avx() {
                 use crate::avx::AvxCdf53;
-                return Box::new(AvxCdf53::default());
+                return Arc::new(AvxCdf53::default());
             }
         }
-        Box::new(Cdf53::<f32>::default())
+        Arc::new(Cdf53::<f32>::default())
     }
 
     /// Creates a new **CDF 5/3 (LeGall)** discrete wavelet transform executor for `f64` signals.
@@ -653,16 +654,16 @@ impl Osclet {
     /// # Returns
     /// A boxed dynamic trait object implementing [`DwtExecutor<f64>`],
     /// providing both forward and inverse transform capabilities.
-    pub fn make_cdf53_f64() -> Box<dyn DwtExecutor<f64> + Send + Sync> {
+    pub fn make_cdf53_f64() -> Arc<dyn DwtExecutor<f64> + Send + Sync> {
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             use crate::factory::has_valid_avx;
             if has_valid_avx() {
                 use crate::avx::AvxCdf53;
-                return Box::new(AvxCdf53::default());
+                return Arc::new(AvxCdf53::default());
             }
         }
-        Box::new(Cdf53::<f64>::default())
+        Arc::new(Cdf53::<f64>::default())
     }
 
     /// Create a forward and inverse DWT executor for the CDF 9/7 wavelet using `f32`.
@@ -672,25 +673,25 @@ impl Osclet {
     /// discrete wavelet transforms using the CDF 9/7 lifting scheme.
     ///
     /// # Returns
-    /// - `Box<dyn DwtExecutor<f32> + Send + Sync>`: A heap-allocated DWT executor object
+    /// - `Arc<dyn DwtExecutor<f32> + Send + Sync>`: A heap-allocated DWT executor object
     ///   that is thread-safe and can be shared across threads.
-    pub fn make_cdf97_f32() -> Box<dyn DwtExecutor<f32> + Send + Sync> {
+    pub fn make_cdf97_f32() -> Arc<dyn DwtExecutor<f32> + Send + Sync> {
         #[cfg(all(target_arch = "aarch64", feature = "neon"))]
         {
             use crate::neon::NeonCdf97F32;
-            Box::new(NeonCdf97F32::default())
+            Arc::new(NeonCdf97F32::default())
         }
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             use crate::factory::has_valid_avx;
             if has_valid_avx() {
                 use crate::avx::AvxCdf97;
-                return Box::new(AvxCdf97::default());
+                return Arc::new(AvxCdf97::default());
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
-            Box::new(Cdf97::<f32>::default())
+            Arc::new(Cdf97::<f32>::default())
         }
     }
 
@@ -701,17 +702,17 @@ impl Osclet {
     /// discrete wavelet transforms using the CDF 9/7 lifting scheme.
     ///
     /// # Returns
-    /// - `Box<dyn DwtExecutor<f64> + Send + Sync>`: A heap-allocated DWT executor object
+    /// - `Arc<dyn DwtExecutor<f64> + Send + Sync>`: A heap-allocated DWT executor object
     ///   that is thread-safe and can be shared across threads.
-    pub fn make_cdf97_f64() -> Box<dyn DwtExecutor<f64> + Send + Sync> {
+    pub fn make_cdf97_f64() -> Arc<dyn DwtExecutor<f64> + Send + Sync> {
         #[cfg(all(target_arch = "x86_64", feature = "avx"))]
         {
             use crate::factory::has_valid_avx;
             if has_valid_avx() {
                 use crate::avx::AvxCdf97;
-                return Box::new(AvxCdf97::default());
+                return Arc::new(AvxCdf97::default());
             }
         }
-        Box::new(Cdf97::<f64>::default())
+        Arc::new(Cdf97::<f64>::default())
     }
 }

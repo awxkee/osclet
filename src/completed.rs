@@ -34,13 +34,14 @@ use crate::{
 };
 use num_traits::{AsPrimitive, MulAdd};
 use std::ops::{Add, Mul};
+use std::sync::Arc;
 
 pub(crate) struct CompletedDwtExecutor<T> {
-    intercepted: Box<dyn IncompleteDwtExecutor<T> + Send + Sync>,
+    intercepted: Arc<dyn IncompleteDwtExecutor<T> + Send + Sync>,
 }
 
 impl<T> CompletedDwtExecutor<T> {
-    pub(crate) fn new(intercepted: Box<dyn IncompleteDwtExecutor<T> + Send + Sync>) -> Self {
+    pub(crate) fn new(intercepted: Arc<dyn IncompleteDwtExecutor<T> + Send + Sync>) -> Self {
         Self { intercepted }
     }
 }
@@ -195,6 +196,7 @@ mod tests {
     use crate::completed::CompletedDwtExecutor;
     use crate::wavelet8taps::Wavelet8Taps;
     use crate::{BorderMode, DaubechiesFamily, DwtExecutor, WaveletFilterProvider};
+    use std::sync::Arc;
 
     #[test]
     fn test_db8_even_big() {
@@ -204,7 +206,7 @@ mod tests {
             input[i] = i as f32 / data_length as f32;
         }
         let db4 = CompletedDwtExecutor {
-            intercepted: Box::new(Wavelet8Taps::new(
+            intercepted: Arc::new(Wavelet8Taps::new(
                 BorderMode::Wrap,
                 DaubechiesFamily::Db4
                     .get_wavelet()

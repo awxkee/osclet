@@ -39,6 +39,6 @@ fuzz_target!(|data: Data| {
     }
     let executor =
         Osclet::make_modwt_f64(Arc::new(WaveletProvider { wavelet }), BorderMode::Wrap).unwrap();
-    let dwt = executor.modwt(&signal, 1).unwrap();
-    _ = executor.imodwt(&dwt, 1).unwrap();
+    let dwt = executor.dwt(&signal, 1).unwrap();
+    _ = executor.idwt(&dwt.to_ref(), 1).unwrap();
 });

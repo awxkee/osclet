@@ -28,10 +28,10 @@
  */
 use crate::avx::util::_mm256_hsum_pd;
 use crate::border_mode::BorderMode;
-use crate::err::OscletError;
-use crate::filter_padding::make_arena_1d;
+use crate::err::{OscletError, try_vec};
+use crate::filter_padding::write_arena_1d;
 use crate::util::{dwt_length, idwt_length, low_pass_to_high};
-use crate::{DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor};
+use crate::{DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor};
 use std::arch::x86_64::*;
 
 pub(crate) struct AvxWaveletNTapsF64 {
@@ -59,7 +59,30 @@ impl DwtForwardExecutor<f64> for AvxWaveletNTapsF64 {
         approx: &mut [f64],
         details: &mut [f64],
     ) -> Result<(), OscletError> {
-        unsafe { self.execute_forward_impl(input, approx, details) }
+        let mut scratch = try_vec![f64::default(); self.required_scratch_size(input.len())];
+        unsafe { self.execute_forward_impl(input, approx, details, &mut scratch) }
+    }
+
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[f64],
+        approx: &mut [f64],
+        details: &mut [f64],
+        scratch: &mut [f64],
+    ) -> Result<(), OscletError> {
+        unsafe { self.execute_forward_impl(input, approx, details, scratch) }
+    }
+
+    fn required_scratch_size(&self, input_length: usize) -> usize {
+        let half = dwt_length(input_length, self.filter_length);
+        let whole_pad_size = (2 * half + self.filter_length - 2) - input_length;
+        let left_pad = whole_pad_size / 2;
+        let right_pad = whole_pad_size - left_pad;
+        left_pad + right_pad + input_length
+    }
+
+    fn dwt_size(&self, input_length: usize) -> DwtSize {
+        DwtSize::new(dwt_length(input_length, self.filter_length()))
     }
 }
 
@@ -70,6 +93,7 @@ impl AvxWaveletNTapsF64 {
         input: &[f64],
         approx: &mut [f64],
         details: &mut [f64],
+        scratch: &mut [f64],
     ) -> Result<(), OscletError> {
         let half = dwt_length(input.len(), self.filter_length);
 
@@ -84,11 +108,18 @@ impl AvxWaveletNTapsF64 {
             return Err(OscletError::ApproxDetailsSize(details.len()));
         }
 
+        let required_size = self.required_scratch_size(input.len());
+        if scratch.len() < required_size {
+            return Err(OscletError::ScratchSize(required_size, scratch.len()));
+        }
+
+        let (padded_input, _) = scratch.split_at_mut(required_size);
+
         let whole_pad_size = (2 * half + self.filter_length - 2) - input.len();
         let left_pad = whole_pad_size / 2;
         let right_pad = whole_pad_size - left_pad;
 
-        let padded_input = make_arena_1d(input, left_pad, right_pad, self.border_mode)?;
+        write_arena_1d(input, padded_input, left_pad, right_pad, self.border_mode)?;
 
         unsafe {
             let mut processed = 0usize;
@@ -209,6 +240,10 @@ impl DwtInverseExecutor<f64> for AvxWaveletNTapsF64 {
     ) -> Result<(), OscletError> {
         unsafe { self.execute_inverse_impl(approx, details, output) }
     }
+
+    fn idwt_size(&self, input_length: DwtSize) -> usize {
+        idwt_length(input_length.approx_length, self.filter_length())
+    }
 }
 
 impl AvxWaveletNTapsF64 {
@@ -229,7 +264,7 @@ impl AvxWaveletNTapsF64 {
         let rec_len = idwt_length(approx.len(), self.filter_length);
 
         if output.len() != rec_len {
-            return Err(OscletError::OutputSizeIsTooSmall(output.len(), rec_len));
+            return Err(OscletError::OutputSizeIsNotValid(output.len(), rec_len));
         }
 
         let whole_pad_size = (2 * approx.len() + self.filter_length - 2) - output.len();

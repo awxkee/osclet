@@ -27,6 +27,13 @@
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/// Represents errors that can occur.
+///
+/// This includes errors related to:
+/// - Invalid input sizes
+/// - Arithmetic overflows
+/// - Misaligned or empty buffers
+/// - Other DWT computation failures
 #[derive(Clone, Debug)]
 pub enum OscletError {
     OutOfMemory(usize),
@@ -34,7 +41,7 @@ pub enum OscletError {
     ApproxDetailsNotMatches(usize, usize),
     InputDivisibleBy(usize),
     Overflow,
-    OutputSizeIsTooSmall(usize, usize),
+    OutputSizeIsNotValid(usize, usize),
     MinFilterSize(usize, usize),
     InOutSizesMismatch(usize, usize),
     ZeroOrOddSizedWavelet,
@@ -42,6 +49,9 @@ pub enum OscletError {
     BufferWasTooSmallForLevel,
     ApproxSizeNotMatches(usize, usize),
     DetailsSizeNotMatches(usize, usize),
+    ZeroedBaseSize,
+    InputSize(usize, usize),
+    ScratchSize(usize, usize),
 }
 
 impl Error for OscletError {}
@@ -50,7 +60,7 @@ impl std::fmt::Display for OscletError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             OscletError::OutOfMemory(length) => {
-                f.write_fmt(format_args!("Cannot allocate {length} bytes to vector",))
+                f.write_fmt(format_args!("Cannot allocate {length} bytes to vector", ))
             }
             OscletError::ApproxDetailsSize(size) => {
                 f.write_fmt(format_args!("Approximation and details expected to be half of original signal length but it was {}", size))
@@ -64,7 +74,7 @@ impl std::fmt::Display for OscletError {
             OscletError::Overflow => {
                 f.write_str("Overflow is happened")
             }
-            OscletError::OutputSizeIsTooSmall(were_length, min_length) => {
+            OscletError::OutputSizeIsNotValid(were_length, min_length) => {
                 f.write_fmt(format_args!("Output size should be {min_length}, but it was {were_length}"))
             }
             OscletError::MinFilterSize(input_size, filter_size) => {
@@ -88,6 +98,9 @@ impl std::fmt::Display for OscletError {
             OscletError::DetailsSizeNotMatches(current_size, required_size) => {
                 f.write_fmt(format_args!("Details size {current_size} does not match required size {required_size}"))
             }
+            OscletError::ZeroedBaseSize => f.write_str("Zero sized input is not supported"),
+            OscletError::InputSize(expected, real_size) => f.write_fmt(format_args!("Input size expected to be {expected} but it was {real_size}")),
+            OscletError::ScratchSize(expected, real_size) => f.write_fmt(format_args!("Scratch size expected to be {expected} but it was {real_size}"))
         }
     }
 }

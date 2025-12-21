@@ -27,10 +27,10 @@
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use crate::avx::util::{_mm_hsum_pd, _mm_hsum_ps, _mm256_hpadd2_ps, shuffle};
-use crate::err::OscletError;
-use crate::filter_padding::make_arena_1d;
-use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr};
-use crate::{BorderMode, DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor};
+use crate::err::{OscletError, try_vec};
+use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr, two_taps_size_for_input};
+use crate::{BorderMode, DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor};
+use num_traits::AsPrimitive;
 use std::arch::x86_64::*;
 
 pub(crate) struct AvxWavelet2TapsF64 {
@@ -57,7 +57,26 @@ impl DwtForwardExecutor<f64> for AvxWavelet2TapsF64 {
         approx: &mut [f64],
         details: &mut [f64],
     ) -> Result<(), OscletError> {
-        unsafe { self.execute_forward_impl(input, approx, details) }
+        let mut scratch = try_vec![f64::default(); self.required_scratch_size(input.len())];
+        unsafe { self.execute_forward_impl(input, approx, details, &mut scratch) }
+    }
+
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[f64],
+        approx: &mut [f64],
+        details: &mut [f64],
+        scratch: &mut [f64],
+    ) -> Result<(), OscletError> {
+        unsafe { self.execute_forward_impl(input, approx, details, scratch) }
+    }
+
+    fn required_scratch_size(&self, _: usize) -> usize {
+        0
+    }
+
+    fn dwt_size(&self, input_length: usize) -> DwtSize {
+        DwtSize::new(dwt_length(input_length, self.filter_length()))
     }
 }
 
@@ -68,6 +87,7 @@ impl AvxWavelet2TapsF64 {
         input: &[f64],
         approx: &mut [f64],
         details: &mut [f64],
+        scratch: &mut [f64],
     ) -> Result<(), OscletError> {
         let half = dwt_length(input.len(), 2);
 
@@ -82,14 +102,17 @@ impl AvxWavelet2TapsF64 {
             return Err(OscletError::ApproxDetailsSize(details.len()));
         }
 
-        let padded_input = make_arena_1d(
-            input,
-            0,
-            if !input.len().is_multiple_of(2) { 1 } else { 0 },
-            self.border_mode,
-        )?;
+        let required_size = self.required_scratch_size(input.len());
+        if scratch.len() < required_size {
+            return Err(OscletError::ScratchSize(required_size, scratch.len()));
+        }
 
         unsafe {
+            let (approx, approx_rem) =
+                approx.split_at_mut(two_taps_size_for_input(input.len(), approx.len()));
+            let (details, details_rem) =
+                details.split_at_mut(two_taps_size_for_input(input.len(), details.len()));
+
             let l0 = _mm256_loadu_pd(self.low_pass.as_ptr());
             let h0 = _mm256_loadu_pd(self.high_pass.as_ptr());
 
@@ -100,7 +123,7 @@ impl AvxWavelet2TapsF64 {
             {
                 let base0 = 2 * 2 * i;
 
-                let input0 = padded_input.get_unchecked(base0..);
+                let input0 = input.get_unchecked(base0..);
 
                 let xw0 = _mm256_loadu_pd(input0.as_ptr());
 
@@ -125,7 +148,7 @@ impl AvxWavelet2TapsF64 {
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
                 let base = processed + 2 * i;
 
-                let input = padded_input.get_unchecked(base..);
+                let input = input.get_unchecked(base..);
 
                 let xw = _mm_loadu_pd(input.as_ptr());
 
@@ -137,6 +160,29 @@ impl AvxWavelet2TapsF64 {
 
                 _mm_storel_pd(approx as *mut f64, a);
                 _mm_storel_pd(detail as *mut f64, d);
+            }
+
+            if !details_rem.is_empty() && !approx_rem.is_empty() {
+                let i = half - 1;
+                let x0 = input.get_unchecked(2 * i);
+                let x1 = self.border_mode.interpolate(
+                    input,
+                    2 * i as isize + 1,
+                    0,
+                    input.len() as isize,
+                );
+
+                let mut a = 0.0f64.as_();
+                let mut d = 0.0f64.as_();
+
+                a = f64::mul_add(self.low_pass[0], *x0, a);
+                d = f64::mul_add(self.high_pass[0], *x0, d);
+
+                a = f64::mul_add(self.low_pass[1], x1, a);
+                d = f64::mul_add(self.high_pass[1], x1, d);
+
+                *approx_rem.last_mut().unwrap() = a;
+                *details_rem.last_mut().unwrap() = d;
             }
         }
         Ok(())
@@ -150,6 +196,10 @@ impl DwtInverseExecutor<f64> for AvxWavelet2TapsF64 {
         output: &mut [f64],
     ) -> Result<(), OscletError> {
         unsafe { self.execute_inverse_impl(approx, details, output) }
+    }
+
+    fn idwt_size(&self, input_length: DwtSize) -> usize {
+        idwt_length(input_length.approx_length, self.filter_length())
     }
 }
 
@@ -171,7 +221,7 @@ impl AvxWavelet2TapsF64 {
         let rec_len = idwt_length(approx.len(), 2);
 
         if output.len() != rec_len {
-            return Err(OscletError::OutputSizeIsTooSmall(output.len(), rec_len));
+            return Err(OscletError::OutputSizeIsNotValid(output.len(), rec_len));
         }
 
         const FILTER_OFFSET: usize = 0;
@@ -305,6 +355,38 @@ impl DwtForwardExecutor<f32> for AvxWavelet2TapsF32 {
         approx: &mut [f32],
         details: &mut [f32],
     ) -> Result<(), OscletError> {
+        let mut scratch = try_vec![f32::default(); self.required_scratch_size(input.len())];
+        unsafe { self.execute_forward_impl(input, approx, details, &mut scratch) }
+    }
+
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[f32],
+        approx: &mut [f32],
+        details: &mut [f32],
+        scratch: &mut [f32],
+    ) -> Result<(), OscletError> {
+        unsafe { self.execute_forward_impl(input, approx, details, scratch) }
+    }
+
+    fn required_scratch_size(&self, _: usize) -> usize {
+        0
+    }
+
+    fn dwt_size(&self, input_length: usize) -> DwtSize {
+        DwtSize::new(dwt_length(input_length, self.filter_length()))
+    }
+}
+
+impl AvxWavelet2TapsF32 {
+    #[target_feature(enable = "avx2", enable = "fma")]
+    fn execute_forward_impl(
+        &self,
+        input: &[f32],
+        approx: &mut [f32],
+        details: &mut [f32],
+        scratch: &mut [f32],
+    ) -> Result<(), OscletError> {
         let half = dwt_length(input.len(), 2);
 
         if input.len() < 2 {
@@ -318,12 +400,15 @@ impl DwtForwardExecutor<f32> for AvxWavelet2TapsF32 {
             return Err(OscletError::ApproxDetailsSize(details.len()));
         }
 
-        let padded_input = make_arena_1d(
-            input,
-            0,
-            if !input.len().is_multiple_of(2) { 1 } else { 0 },
-            self.border_mode,
-        )?;
+        let required_size = self.required_scratch_size(input.len());
+        if scratch.len() < required_size {
+            return Err(OscletError::ScratchSize(required_size, scratch.len()));
+        }
+
+        let (approx, approx_rem) =
+            approx.split_at_mut(two_taps_size_for_input(input.len(), approx.len()));
+        let (details, details_rem) =
+            details.split_at_mut(two_taps_size_for_input(input.len(), details.len()));
 
         unsafe {
             let l0 = _mm256_loadu_ps(self.low_pass.as_ptr());
@@ -338,7 +423,7 @@ impl DwtForwardExecutor<f32> for AvxWavelet2TapsF32 {
             {
                 let base0 = 2 * 8 * i;
 
-                let input0 = padded_input.get_unchecked(base0..);
+                let input0 = input.get_unchecked(base0..);
 
                 let xw0 = _mm256_loadu_ps(input0.as_ptr());
                 let xw2 = _mm256_loadu_ps(input0.get_unchecked(8..).as_ptr());
@@ -368,7 +453,7 @@ impl DwtForwardExecutor<f32> for AvxWavelet2TapsF32 {
             let approx = approx.chunks_exact_mut(8).into_remainder();
             let details = details.chunks_exact_mut(8).into_remainder();
 
-            let padded_input = padded_input.get_unchecked(processed * 2..);
+            let padded_input = input.get_unchecked(processed * 2..);
             processed = 0;
 
             for (i, (approx, detail)) in approx
@@ -414,6 +499,29 @@ impl DwtForwardExecutor<f32> for AvxWavelet2TapsF32 {
                 _mm_store_ss(approx as *mut f32, a);
                 _mm_store_ss(detail as *mut f32, d);
             }
+
+            if !details_rem.is_empty() && !approx_rem.is_empty() {
+                let i = half - 1;
+                let x0 = input.get_unchecked(2 * i);
+                let x1 = self.border_mode.interpolate(
+                    input,
+                    2 * i as isize + 1,
+                    0,
+                    input.len() as isize,
+                );
+
+                let mut a = 0.0f64.as_();
+                let mut d = 0.0f64.as_();
+
+                a = f32::mul_add(self.low_pass[0], *x0, a);
+                d = f32::mul_add(self.high_pass[0], *x0, d);
+
+                a = f32::mul_add(self.low_pass[1], x1, a);
+                d = f32::mul_add(self.high_pass[1], x1, d);
+
+                *approx_rem.last_mut().unwrap() = a;
+                *details_rem.last_mut().unwrap() = d;
+            }
         }
         Ok(())
     }
@@ -421,6 +529,22 @@ impl DwtForwardExecutor<f32> for AvxWavelet2TapsF32 {
 
 impl DwtInverseExecutor<f32> for AvxWavelet2TapsF32 {
     fn execute_inverse(
+        &self,
+        approx: &[f32],
+        details: &[f32],
+        output: &mut [f32],
+    ) -> Result<(), OscletError> {
+        unsafe { self.execute_inverse_impl(approx, details, output) }
+    }
+
+    fn idwt_size(&self, input_length: DwtSize) -> usize {
+        idwt_length(input_length.approx_length, self.filter_length())
+    }
+}
+
+impl AvxWavelet2TapsF32 {
+    #[target_feature(enable = "avx2", enable = "fma")]
+    fn execute_inverse_impl(
         &self,
         approx: &[f32],
         details: &[f32],
@@ -436,7 +560,7 @@ impl DwtInverseExecutor<f32> for AvxWavelet2TapsF32 {
         let rec_len = idwt_length(approx.len(), 2);
 
         if output.len() != rec_len {
-            return Err(OscletError::OutputSizeIsTooSmall(output.len(), rec_len));
+            return Err(OscletError::OutputSizeIsNotValid(output.len(), rec_len));
         }
 
         const FILTER_OFFSET: usize = 0;

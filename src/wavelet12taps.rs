@@ -26,16 +26,15 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use crate::border_mode::BorderMode;
-use crate::err::OscletError;
-use crate::filter_padding::{MakeArenaFactoryProvider, make_arena_1d};
+use crate::border_mode::{BorderInterpolation, BorderMode};
+use crate::err::{OscletError, try_vec};
 use crate::mla::fmla;
-use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr};
-use crate::{DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor};
-use num_traits::{AsPrimitive, MulAdd};
-use std::fmt::Debug;
+use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr, twelve_taps_size_for_input};
+use crate::{
+    DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor, WaveletSample,
+};
+use num_traits::AsPrimitive;
 use std::marker::PhantomData;
-use std::ops::{Add, Mul};
 
 pub(crate) struct Wavelet12Taps<T> {
     phantom_data: PhantomData<T>,
@@ -44,7 +43,7 @@ pub(crate) struct Wavelet12Taps<T> {
     high_pass: [T; 12],
 }
 
-impl<T: Copy + 'static + Debug + Default + Mul<T, Output = T>> Wavelet12Taps<T>
+impl<T: WaveletSample> Wavelet12Taps<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -59,15 +58,7 @@ where
     }
 }
 
-impl<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + MakeArenaFactoryProvider<T>,
-> DwtForwardExecutor<T> for Wavelet12Taps<T>
+impl<T: WaveletSample> DwtForwardExecutor<T> for Wavelet12Taps<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -76,6 +67,17 @@ where
         input: &[T],
         approx: &mut [T],
         details: &mut [T],
+    ) -> Result<(), OscletError> {
+        let mut scratch = try_vec![T::default(); self.required_scratch_size(input.len())];
+        self.execute_forward_with_scratch(input, approx, details, &mut scratch)
+    }
+
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[T],
+        approx: &mut [T],
+        details: &mut [T],
+        scratch: &mut [T],
     ) -> Result<(), OscletError> {
         let half = dwt_length(input.len(), 12);
 
@@ -90,27 +92,203 @@ where
             return Err(OscletError::ApproxDetailsSize(details.len()));
         }
 
-        const FILTER_SIZE: usize = 12;
-
-        let whole_size = (2 * half + FILTER_SIZE - 2) - input.len();
-        let left_pad = whole_size / 2;
-        let right_pad = whole_size - left_pad;
-
-        let padded_input = make_arena_1d(input, left_pad, right_pad, self.border_mode)?;
+        let required_size = self.required_scratch_size(input.len());
+        if scratch.len() < required_size {
+            return Err(OscletError::ScratchSize(required_size, scratch.len()));
+        }
 
         unsafe {
+            let interpolation = BorderInterpolation::new(self.border_mode, 0, input.len() as isize);
+
+            let (front_approx, approx) = approx.split_at_mut(5);
+            let (front_detail, details) = details.split_at_mut(5);
+
+            for (i, (approx, detail)) in front_approx
+                .iter_mut()
+                .zip(front_detail.iter_mut())
+                .enumerate()
+            {
+                let mut a = 0.0f64.as_();
+                let mut d = 0.0f64.as_();
+                let base = 2 * i as isize - 10;
+
+                let x0 = interpolation.interpolate(input, base);
+                let x1 = interpolation.interpolate(input, base + 1);
+                let x2 = interpolation.interpolate(input, base + 2);
+                let x3 = interpolation.interpolate(input, base + 3);
+                let x4 = interpolation.interpolate(input, base + 4);
+                let x5 = interpolation.interpolate(input, base + 5);
+                let x6 = interpolation.interpolate(input, base + 6);
+                let x7 = interpolation.interpolate(input, base + 7);
+                let x8 = interpolation.interpolate(input, base + 8);
+                let x9 = interpolation.interpolate(input, base + 9);
+                let x10 = *input.get_unchecked((base + 10) as usize);
+                let x11 = *input.get_unchecked((base + 11) as usize);
+
+                a = fmla(self.low_pass[0], x0, a);
+                d = fmla(self.high_pass[0], x0, d);
+
+                a = fmla(self.low_pass[1], x1, a);
+                d = fmla(self.high_pass[1], x1, d);
+
+                a = fmla(self.low_pass[2], x2, a);
+                d = fmla(self.high_pass[2], x2, d);
+
+                a = fmla(self.low_pass[3], x3, a);
+                d = fmla(self.high_pass[3], x3, d);
+
+                a = fmla(self.low_pass[4], x4, a);
+                d = fmla(self.high_pass[4], x4, d);
+
+                a = fmla(self.low_pass[5], x5, a);
+                d = fmla(self.high_pass[5], x5, d);
+
+                a = fmla(self.low_pass[6], x6, a);
+                d = fmla(self.high_pass[6], x6, d);
+
+                a = fmla(self.low_pass[7], x7, a);
+                d = fmla(self.high_pass[7], x7, d);
+
+                a = fmla(self.low_pass[8], x8, a);
+                d = fmla(self.high_pass[8], x8, d);
+
+                a = fmla(self.low_pass[9], x9, a);
+                d = fmla(self.high_pass[9], x9, d);
+
+                a = fmla(self.low_pass[10], x10, a);
+                d = fmla(self.high_pass[10], x10, d);
+
+                a = fmla(self.low_pass[11], x11, a);
+                d = fmla(self.high_pass[11], x11, d);
+
+                *approx = a;
+                *detail = d;
+            }
+
+            let (approx, approx_rem) =
+                approx.split_at_mut(twelve_taps_size_for_input(input.len(), approx.len()));
+            let (details, details_rem) =
+                details.split_at_mut(twelve_taps_size_for_input(input.len(), details.len()));
+
+            let base_start = approx.len();
+
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
                 let mut a = 0.0f64.as_();
                 let mut d = 0.0f64.as_();
                 let base = 2 * i;
 
-                let input = padded_input.get_unchecked(base..);
+                let input = input.get_unchecked(base..);
 
-                for i in 0..12 {
-                    let x0 = input.get_unchecked(i);
-                    a = fmla(self.low_pass[i], *x0, a);
-                    d = fmla(self.high_pass[i], *x0, d);
-                }
+                let x0 = *input.get_unchecked(0);
+                let x1 = *input.get_unchecked(1);
+                let x2 = *input.get_unchecked(2);
+                let x3 = *input.get_unchecked(3);
+                let x4 = *input.get_unchecked(4);
+                let x5 = *input.get_unchecked(5);
+                let x6 = *input.get_unchecked(6);
+                let x7 = *input.get_unchecked(7);
+                let x8 = *input.get_unchecked(8);
+                let x9 = *input.get_unchecked(9);
+                let x10 = *input.get_unchecked(10);
+                let x11 = *input.get_unchecked(11);
+
+                a = fmla(self.low_pass[0], x0, a);
+                d = fmla(self.high_pass[0], x0, d);
+
+                a = fmla(self.low_pass[1], x1, a);
+                d = fmla(self.high_pass[1], x1, d);
+
+                a = fmla(self.low_pass[2], x2, a);
+                d = fmla(self.high_pass[2], x2, d);
+
+                a = fmla(self.low_pass[3], x3, a);
+                d = fmla(self.high_pass[3], x3, d);
+
+                a = fmla(self.low_pass[4], x4, a);
+                d = fmla(self.high_pass[4], x4, d);
+
+                a = fmla(self.low_pass[5], x5, a);
+                d = fmla(self.high_pass[5], x5, d);
+
+                a = fmla(self.low_pass[6], x6, a);
+                d = fmla(self.high_pass[6], x6, d);
+
+                a = fmla(self.low_pass[7], x7, a);
+                d = fmla(self.high_pass[7], x7, d);
+
+                a = fmla(self.low_pass[8], x8, a);
+                d = fmla(self.high_pass[8], x8, d);
+
+                a = fmla(self.low_pass[9], x9, a);
+                d = fmla(self.high_pass[9], x9, d);
+
+                a = fmla(self.low_pass[10], x10, a);
+                d = fmla(self.high_pass[10], x10, d);
+
+                a = fmla(self.low_pass[11], x11, a);
+                d = fmla(self.high_pass[11], x11, d);
+
+                *approx = a;
+                *detail = d;
+            }
+
+            for (i, (approx, detail)) in approx_rem
+                .iter_mut()
+                .zip(details_rem.iter_mut())
+                .enumerate()
+            {
+                let mut a = 0.0f64.as_();
+                let mut d = 0.0f64.as_();
+                let base = 2 * (i + base_start);
+
+                let x0 = *input.get_unchecked(base);
+                let x1 = interpolation.interpolate(input, base as isize + 1);
+                let x2 = interpolation.interpolate(input, base as isize + 2);
+                let x3 = interpolation.interpolate(input, base as isize + 3);
+                let x4 = interpolation.interpolate(input, base as isize + 4);
+                let x5 = interpolation.interpolate(input, base as isize + 5);
+                let x6 = interpolation.interpolate(input, base as isize + 6);
+                let x7 = interpolation.interpolate(input, base as isize + 7);
+                let x8 = interpolation.interpolate(input, base as isize + 8);
+                let x9 = interpolation.interpolate(input, base as isize + 9);
+                let x10 = interpolation.interpolate(input, base as isize + 10);
+                let x11 = interpolation.interpolate(input, base as isize + 11);
+
+                a = fmla(self.low_pass[0], x0, a);
+                d = fmla(self.high_pass[0], x0, d);
+
+                a = fmla(self.low_pass[1], x1, a);
+                d = fmla(self.high_pass[1], x1, d);
+
+                a = fmla(self.low_pass[2], x2, a);
+                d = fmla(self.high_pass[2], x2, d);
+
+                a = fmla(self.low_pass[3], x3, a);
+                d = fmla(self.high_pass[3], x3, d);
+
+                a = fmla(self.low_pass[4], x4, a);
+                d = fmla(self.high_pass[4], x4, d);
+
+                a = fmla(self.low_pass[5], x5, a);
+                d = fmla(self.high_pass[5], x5, d);
+
+                a = fmla(self.low_pass[6], x6, a);
+                d = fmla(self.high_pass[6], x6, d);
+
+                a = fmla(self.low_pass[7], x7, a);
+                d = fmla(self.high_pass[7], x7, d);
+
+                a = fmla(self.low_pass[8], x8, a);
+                d = fmla(self.high_pass[8], x8, d);
+
+                a = fmla(self.low_pass[9], x9, a);
+                d = fmla(self.high_pass[9], x9, d);
+
+                a = fmla(self.low_pass[10], x10, a);
+                d = fmla(self.high_pass[10], x10, d);
+
+                a = fmla(self.low_pass[11], x11, a);
+                d = fmla(self.high_pass[11], x11, d);
 
                 *approx = a;
                 *detail = d;
@@ -118,10 +296,17 @@ where
         }
         Ok(())
     }
+
+    fn required_scratch_size(&self, _: usize) -> usize {
+        0
+    }
+
+    fn dwt_size(&self, input_length: usize) -> DwtSize {
+        DwtSize::new(dwt_length(input_length, 12))
+    }
 }
 
-impl<T: Copy + 'static + MulAdd<T, Output = T> + Add<T, Output = T> + Mul<T, Output = T> + Default>
-    DwtInverseExecutor<T> for Wavelet12Taps<T>
+impl<T: WaveletSample> DwtInverseExecutor<T> for Wavelet12Taps<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -141,7 +326,7 @@ where
         let rec_len = idwt_length(approx.len(), 12);
 
         if output.len() != rec_len {
-            return Err(OscletError::OutputSizeIsTooSmall(output.len(), rec_len));
+            return Err(OscletError::OutputSizeIsNotValid(output.len(), rec_len));
         }
 
         const FILTER_OFFSET: usize = 10;
@@ -202,19 +387,13 @@ where
         }
         Ok(())
     }
+
+    fn idwt_size(&self, input_length: DwtSize) -> usize {
+        idwt_length(input_length.approx_length, 12)
+    }
 }
 
-impl<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + Send
-        + Sync
-        + MakeArenaFactoryProvider<T>,
-> IncompleteDwtExecutor<T> for Wavelet12Taps<T>
+impl<T: WaveletSample> IncompleteDwtExecutor<T> for Wavelet12Taps<T>
 where
     f64: AsPrimitive<T>,
 {

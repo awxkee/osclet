@@ -19,6 +19,7 @@ default-features = false
 default = []
 neon = ["osclet/neon"]
 avx = ["osclet/avx"]
+sse = ["osclet/sse"]
 
 [[bin]]
 name = "single_prec_wave"

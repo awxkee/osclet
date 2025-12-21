@@ -26,12 +26,14 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use crate::avx::util::{_mm256_hpadd2_ps, _mm256_hsum_ps, shuffle};
-use crate::border_mode::BorderMode;
-use crate::err::OscletError;
-use crate::filter_padding::make_arena_1d;
-use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr};
-use crate::{DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor};
+use crate::avx::util::{
+    _mm_unpack2lo_ps, _mm_unpackhilo_ps64, _mm256_hpadd2_ps, _mm256_hsum_ps, _mm256_permute_ps64,
+    shuffle,
+};
+use crate::border_mode::{BorderInterpolation, BorderMode};
+use crate::err::{OscletError, try_vec};
+use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr, sixth_taps_size_for_input};
+use crate::{DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor};
 use std::arch::x86_64::*;
 
 pub(crate) struct AvxWavelet6TapsF32 {
@@ -60,7 +62,26 @@ impl DwtForwardExecutor<f32> for AvxWavelet6TapsF32 {
         approx: &mut [f32],
         details: &mut [f32],
     ) -> Result<(), OscletError> {
-        unsafe { self.execute_forward_impl(input, approx, details) }
+        let mut scratch = try_vec![f32::default(); self.required_scratch_size(input.len())];
+        unsafe { self.execute_forward_impl(input, approx, details, &mut scratch) }
+    }
+
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[f32],
+        approx: &mut [f32],
+        details: &mut [f32],
+        scratch: &mut [f32],
+    ) -> Result<(), OscletError> {
+        unsafe { self.execute_forward_impl(input, approx, details, scratch) }
+    }
+
+    fn required_scratch_size(&self, _: usize) -> usize {
+        0
+    }
+
+    fn dwt_size(&self, input_length: usize) -> DwtSize {
+        DwtSize::new(dwt_length(input_length, self.filter_length()))
     }
 }
 
@@ -71,6 +92,7 @@ impl AvxWavelet6TapsF32 {
         input: &[f32],
         approx: &mut [f32],
         details: &mut [f32],
+        scratch: &mut [f32],
     ) -> Result<(), OscletError> {
         let half = dwt_length(input.len(), 6);
 
@@ -85,17 +107,51 @@ impl AvxWavelet6TapsF32 {
             return Err(OscletError::ApproxDetailsSize(details.len()));
         }
 
-        const FILTER_SIZE: usize = 6;
-
-        let whole_size = (2 * half + FILTER_SIZE - 2) - input.len();
-        let left_pad = whole_size / 2;
-        let right_pad = whole_size - left_pad;
-
-        let padded_input = make_arena_1d(input, left_pad, right_pad, self.border_mode)?;
+        let required_size = self.required_scratch_size(input.len());
+        if scratch.len() < required_size {
+            return Err(OscletError::ScratchSize(required_size, scratch.len()));
+        }
 
         unsafe {
+            let interpolation = BorderInterpolation::new(self.border_mode, 0, input.len() as isize);
+
             let h0 = _mm256_loadu_ps(self.low_pass.as_ptr());
             let g0 = _mm256_loadu_ps(self.high_pass.as_ptr());
+
+            let (front_approx, approx) = approx.split_at_mut(2);
+            let (front_detail, details) = details.split_at_mut(2);
+
+            for (i, (approx, detail)) in front_approx
+                .iter_mut()
+                .zip(front_detail.iter_mut())
+                .enumerate()
+            {
+                let base = 2 * i as isize - 4;
+
+                let x0 = interpolation.interpolate(input, base);
+                let x1 = interpolation.interpolate(input, base + 1);
+                let x2 = interpolation.interpolate(input, base + 2);
+                let x3 = interpolation.interpolate(input, base + 3);
+                let x4 = input.get_unchecked((base + 4) as usize);
+                let x5 = input.get_unchecked((base + 5) as usize);
+
+                let vals = _mm256_setr_ps(x0, x1, x2, x3, *x4, *x5, 0., 0.);
+                let a = _mm256_mul_ps(vals, h0);
+                let d = _mm256_mul_ps(vals, g0);
+
+                let a = _mm256_hsum_ps(a);
+                let d = _mm256_hsum_ps(d);
+
+                _mm_store_ss(approx, a);
+                _mm_store_ss(detail, d);
+            }
+
+            let (approx, approx_rem) =
+                approx.split_at_mut(sixth_taps_size_for_input(input.len(), approx.len()));
+            let (details, details_rem) =
+                details.split_at_mut(sixth_taps_size_for_input(input.len(), details.len()));
+
+            let app_length = approx.len();
 
             let mut processed = 0usize;
 
@@ -106,7 +162,7 @@ impl AvxWavelet6TapsF32 {
             {
                 let base0 = 2 * 2 * i;
 
-                let input0 = padded_input.get_unchecked(base0..);
+                let input0 = input.get_unchecked(base0..);
 
                 let xw00 = _mm256_loadu_ps(input0.as_ptr());
 
@@ -137,12 +193,11 @@ impl AvxWavelet6TapsF32 {
 
             let approx = approx.chunks_exact_mut(2).into_remainder();
             let details = details.chunks_exact_mut(2).into_remainder();
-            let padded_input = padded_input.get_unchecked(processed * 2..);
 
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
-                let base = 2 * i;
+                let base = 2 * (i + processed);
 
-                let input = padded_input.get_unchecked(base..);
+                let input = input.get_unchecked(base..);
 
                 let px0 = _mm_loadu_ps(input.as_ptr());
                 let px1 =
@@ -159,6 +214,31 @@ impl AvxWavelet6TapsF32 {
                 _mm_store_ss(approx as *mut f32, wa);
                 _mm_store_ss(detail as *mut f32, wd);
             }
+
+            for (i, (approx, detail)) in approx_rem
+                .iter_mut()
+                .zip(details_rem.iter_mut())
+                .enumerate()
+            {
+                let base = 2 * (i + app_length);
+
+                let x0 = *input.get_unchecked(base);
+                let x1 = interpolation.interpolate(input, base as isize + 1);
+                let x2 = interpolation.interpolate(input, base as isize + 2);
+                let x3 = interpolation.interpolate(input, base as isize + 3);
+                let x4 = interpolation.interpolate(input, base as isize + 4);
+                let x5 = interpolation.interpolate(input, base as isize + 5);
+
+                let vals = _mm256_setr_ps(x0, x1, x2, x3, x4, x5, 0., 0.);
+                let a = _mm256_mul_ps(vals, h0);
+                let d = _mm256_mul_ps(vals, g0);
+
+                let a = _mm256_hsum_ps(a);
+                let d = _mm256_hsum_ps(d);
+
+                _mm_store_ss(approx, a);
+                _mm_store_ss(detail, d);
+            }
         }
         Ok(())
     }
@@ -172,6 +252,10 @@ impl DwtInverseExecutor<f32> for AvxWavelet6TapsF32 {
         output: &mut [f32],
     ) -> Result<(), OscletError> {
         unsafe { self.execute_inverse_impl(approx, details, output) }
+    }
+
+    fn idwt_size(&self, input_length: DwtSize) -> usize {
+        idwt_length(input_length.approx_length, self.filter_length())
     }
 }
 
@@ -193,7 +277,7 @@ impl AvxWavelet6TapsF32 {
         let rec_len = idwt_length(approx.len(), 6);
 
         if output.len() != rec_len {
-            return Err(OscletError::OutputSizeIsTooSmall(output.len(), rec_len));
+            return Err(OscletError::OutputSizeIsNotValid(output.len(), rec_len));
         }
 
         const FILTER_OFFSET: usize = 4;
@@ -229,7 +313,81 @@ impl AvxWavelet6TapsF32 {
                 let h0 = _mm256_loadu_ps(self.low_pass.as_ptr());
                 let g0 = _mm256_loadu_ps(self.high_pass.as_ptr());
 
-                for i in safe_start..safe_end {
+                // this is ugly as we need for each step 6 items, 4 after previous stage
+                // and append new two to the end. Repeat 4 times.
+
+                let mut ui = safe_start;
+
+                while ui + 4 < safe_end {
+                    let (h, g) = (
+                        _mm_loadu_ps(approx.get_unchecked(ui)),
+                        _mm_loadu_ps(details.get_unchecked(ui)),
+                    );
+
+                    let h = _mm256_insertf128_ps::<1>(_mm256_castps128_ps256(h), h);
+                    let g = _mm256_insertf128_ps::<1>(_mm256_castps128_ps256(g), g);
+
+                    let k = 2 * ui as isize - FILTER_OFFSET as isize;
+                    let part0 = output.get_unchecked_mut(k as usize..);
+                    let q0 = _mm256_loadu_ps(part0.as_ptr());
+                    let q1 = _mm_loadu_ps(part0.get_unchecked(8..).as_ptr());
+
+                    let wh0 = _mm256_shuffle_ps::<{ shuffle(0, 0, 0, 0) }>(h, h);
+                    let wg0 = _mm256_shuffle_ps::<{ shuffle(0, 0, 0, 0) }>(g, g);
+
+                    let w0 = _mm256_fmadd_ps(g0, wg0, _mm256_fmadd_ps(h0, wh0, q0)); // first done item the lowest two w0
+
+                    let interim_w0 = _mm256_permute_ps64::<{ shuffle(0, 0, 2, 1) }>(w0);
+                    let t0 = _mm256_permute_ps64::<{ shuffle(2, 3, 2, 3) }>(q0);
+                    let iw0 = _mm256_blend_ps::<0b11110000>(interim_w0, t0);
+
+                    let wh1 = _mm256_shuffle_ps::<{ shuffle(1, 1, 1, 1) }>(h, h);
+                    let wg1 = _mm256_shuffle_ps::<{ shuffle(1, 1, 1, 1) }>(g, g);
+
+                    let w1 = _mm256_fmadd_ps(g0, wg1, _mm256_fmadd_ps(h0, wh1, iw0)); // second item done the lowest two w1
+
+                    let packed_lo1 =
+                        _mm_unpack2lo_ps(_mm256_castps256_ps128(w0), _mm256_castps256_ps128(w1));
+
+                    let dupq1 = _mm256_insertf128_ps::<1>(_mm256_castps128_ps256(q1), q1);
+
+                    let interim_w1 = _mm256_permute_ps64::<{ shuffle(0, 0, 2, 1) }>(w1);
+                    let iw2 = _mm256_blend_ps::<0b11110000>(interim_w1, dupq1);
+
+                    let wh2 = _mm256_shuffle_ps::<{ shuffle(2, 2, 2, 2) }>(h, h);
+                    let wg2 = _mm256_shuffle_ps::<{ shuffle(2, 2, 2, 2) }>(g, g);
+
+                    let w2 = _mm256_fmadd_ps(g0, wg2, _mm256_fmadd_ps(h0, wh2, iw2)); // third item done the lowest two w2
+
+                    let interim_w2 = _mm256_permute_ps64::<{ shuffle(0, 0, 2, 1) }>(w2);
+                    let swapped_lohi = _mm_unpackhilo_ps64(q1, q1);
+                    let dup_swapped_hi_lo = _mm256_insertf128_ps::<1>(
+                        _mm256_castps128_ps256(swapped_lohi),
+                        swapped_lohi,
+                    );
+
+                    let iw3 = _mm256_blend_ps::<0b11110000>(interim_w2, dup_swapped_hi_lo);
+
+                    let wh3 = _mm256_shuffle_ps::<{ shuffle(3, 3, 3, 3) }>(h, h);
+                    let wg3 = _mm256_shuffle_ps::<{ shuffle(3, 3, 3, 3) }>(g, g);
+
+                    let w3 = _mm256_fmadd_ps(g0, wg3, _mm256_fmadd_ps(h0, wh3, iw3)); // fourth item done the lowest two w2
+
+                    let packed_lo2 =
+                        _mm_unpack2lo_ps(_mm256_castps256_ps128(w2), _mm256_castps256_ps128(w3));
+
+                    let packed =
+                        _mm256_insertf128_ps::<1>(_mm256_castps128_ps256(packed_lo1), packed_lo2);
+                    _mm256_storeu_ps(part0.as_mut_ptr(), packed);
+                    let tail = _mm256_permute_ps64::<{ shuffle(0, 0, 2, 1) }>(w3);
+                    _mm_storeu_ps(
+                        part0.get_unchecked_mut(8..).as_mut_ptr(),
+                        _mm256_castps256_ps128(tail),
+                    );
+                    ui += 4;
+                }
+
+                for i in ui..safe_end {
                     let (h, g) = (
                         _mm256_set1_ps(*approx.get_unchecked(i)),
                         _mm256_set1_ps(*details.get_unchecked(i)),
@@ -488,6 +646,45 @@ mod tests {
                 x
             );
         });
+
+        let mut reconstructed = vec![0.0; idwt_length(approx.len(), 6)];
+        db3.execute_inverse(&approx, &details, &mut reconstructed)
+            .unwrap();
+        reconstructed.iter().take(input.len()).enumerate().for_each(|(i, x)| {
+            assert!(
+                (input[i] - x).abs() < 1e-3,
+                "reconstructed difference expected to be < 1e-3, but values were ref {}, derived {}",
+                input[i],
+                x
+            );
+        });
+    }
+
+    #[test]
+    fn test_coif_big() {
+        if !has_avx_with_fma() {
+            return;
+        }
+        let input = vec![
+            1.0, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3, 1.0,
+            2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3, 1.0, 2.0,
+            3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3, 1.0, 2.0, 3.0,
+            4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3, 1.0, 2.0, 3.0, 4.0,
+            2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3,
+        ];
+        let db3 = AvxWavelet6TapsF32::new(
+            BorderMode::Wrap,
+            CoifletFamily::Coif1
+                .get_wavelet()
+                .as_ref()
+                .try_into()
+                .unwrap(),
+        );
+        let out_length = dwt_length(input.len(), 6);
+        let mut approx = vec![0.0; out_length];
+        let mut details = vec![0.0; out_length];
+        db3.execute_forward(&input, &mut approx, &mut details)
+            .unwrap();
 
         let mut reconstructed = vec![0.0; idwt_length(approx.len(), 6)];
         db3.execute_inverse(&approx, &details, &mut reconstructed)

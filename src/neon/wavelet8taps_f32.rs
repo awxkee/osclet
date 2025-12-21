@@ -26,12 +26,11 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use crate::border_mode::BorderMode;
-use crate::err::OscletError;
-use crate::filter_padding::make_arena_1d;
+use crate::border_mode::{BorderInterpolation, BorderMode};
+use crate::err::{OscletError, try_vec};
 use crate::mla::fmla;
-use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr};
-use crate::{DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor};
+use crate::util::{dwt_length, eight_taps_size_for_input, idwt_length, low_pass_to_high_from_arr};
+use crate::{DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor};
 use std::arch::aarch64::*;
 
 pub(crate) struct NeonWavelet8TapsF32 {
@@ -57,6 +56,17 @@ impl DwtForwardExecutor<f32> for NeonWavelet8TapsF32 {
         approx: &mut [f32],
         details: &mut [f32],
     ) -> Result<(), OscletError> {
+        let mut scratch = try_vec![f32::default(); self.required_scratch_size(input.len())];
+        self.execute_forward_with_scratch(input, approx, details, &mut scratch)
+    }
+
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[f32],
+        approx: &mut [f32],
+        details: &mut [f32],
+        scratch: &mut [f32],
+    ) -> Result<(), OscletError> {
         let half = dwt_length(input.len(), 8);
 
         if input.len() < 8 {
@@ -70,19 +80,59 @@ impl DwtForwardExecutor<f32> for NeonWavelet8TapsF32 {
             return Err(OscletError::ApproxDetailsSize(details.len()));
         }
 
-        const FILTER_SIZE: usize = 8;
-
-        let whole_size = (2 * half + FILTER_SIZE - 2) - input.len();
-        let left_pad = whole_size / 2;
-        let right_pad = whole_size - left_pad;
-
-        let padded_input = make_arena_1d(input, left_pad, right_pad, self.border_mode)?;
+        let required_size = self.required_scratch_size(input.len());
+        if scratch.len() < required_size {
+            return Err(OscletError::ScratchSize(required_size, scratch.len()));
+        }
 
         unsafe {
             let h = vld1q_f32(self.low_pass.as_ptr());
             let h2 = vld1q_f32(self.low_pass.get_unchecked(4..).as_ptr());
             let g = vld1q_f32(self.high_pass.as_ptr());
             let g2 = vld1q_f32(self.high_pass.get_unchecked(4..).as_ptr());
+
+            let interpolation = BorderInterpolation::new(self.border_mode, 0, input.len() as isize);
+
+            let (front_approx, approx) = approx.split_at_mut(3);
+            let (front_detail, details) = details.split_at_mut(3);
+
+            for (i, (approx, detail)) in front_approx
+                .iter_mut()
+                .zip(front_detail.iter_mut())
+                .enumerate()
+            {
+                let base = 2 * i as isize - 6;
+
+                let x0 = interpolation.interpolate(input, base);
+                let x1 = interpolation.interpolate(input, base + 1);
+                let x2 = interpolation.interpolate(input, base + 2);
+                let x3 = interpolation.interpolate(input, base + 3);
+                let x4 = interpolation.interpolate(input, base + 4);
+                let x5 = interpolation.interpolate(input, base + 5);
+                let x6 = input.get_unchecked((base + 6) as usize);
+                let x7 = input.get_unchecked((base + 7) as usize);
+
+                let val0 = vld1q_f32([x0, x1, x2, x3].as_ptr());
+                let val1 = vld1q_f32([x4, x5, *x6, *x7].as_ptr());
+
+                let a = vfmaq_f32(vmulq_f32(val0, h), val1, h2);
+                let d = vfmaq_f32(vmulq_f32(val0, g), val1, g2);
+
+                let q0 = vpadd_f32(
+                    vadd_f32(vget_low_f32(a), vget_high_f32(a)),
+                    vadd_f32(vget_low_f32(d), vget_high_f32(d)),
+                );
+
+                vst1_lane_f32::<0>(approx, q0);
+                vst1_lane_f32::<1>(detail, q0);
+            }
+
+            let (approx, approx_rem) =
+                approx.split_at_mut(eight_taps_size_for_input(input.len(), approx.len()));
+            let (details, details_rem) =
+                details.split_at_mut(eight_taps_size_for_input(input.len(), details.len()));
+
+            let base_start = approx.len();
 
             let mut processed = 0usize;
 
@@ -92,7 +142,7 @@ impl DwtForwardExecutor<f32> for NeonWavelet8TapsF32 {
                 .enumerate()
             {
                 let base = 2 * 2 * i;
-                let input = padded_input.get_unchecked(base..);
+                let input = input.get_unchecked(base..);
 
                 let xw = vld1q_f32(input.as_ptr());
                 let xw1 = vld1q_f32(input.get_unchecked(4..).as_ptr());
@@ -121,11 +171,10 @@ impl DwtForwardExecutor<f32> for NeonWavelet8TapsF32 {
 
             let approx = approx.chunks_exact_mut(2).into_remainder();
             let details = details.chunks_exact_mut(2).into_remainder();
-            let padded_input = padded_input.get_unchecked(processed * 2..);
 
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
-                let base = 2 * i;
-                let input = padded_input.get_unchecked(base..);
+                let base = 2 * (i + processed);
+                let input = input.get_unchecked(base..);
 
                 let xw = vld1q_f32(input.as_ptr());
                 let xw1 = vld1q_f32(input.get_unchecked(4..).as_ptr());
@@ -133,14 +182,55 @@ impl DwtForwardExecutor<f32> for NeonWavelet8TapsF32 {
                 let a = vfmaq_f32(vmulq_f32(xw, h), xw1, h2);
                 let d = vfmaq_f32(vmulq_f32(xw, g), xw1, g2);
 
-                let a0 = vpadds_f32(vadd_f32(vget_low_f32(a), vget_high_f32(a)));
-                let d0 = vpadds_f32(vadd_f32(vget_low_f32(d), vget_high_f32(d)));
+                let q0 = vpadd_f32(
+                    vadd_f32(vget_low_f32(a), vget_high_f32(a)),
+                    vadd_f32(vget_low_f32(d), vget_high_f32(d)),
+                );
 
-                *approx = a0;
-                *detail = d0;
+                vst1_lane_f32::<0>(approx, q0);
+                vst1_lane_f32::<1>(detail, q0);
+            }
+
+            for (i, (approx, detail)) in approx_rem
+                .iter_mut()
+                .zip(details_rem.iter_mut())
+                .enumerate()
+            {
+                let base = 2 * (i + base_start);
+
+                let x0 = *input.get_unchecked(base);
+                let x1 = interpolation.interpolate(input, base as isize + 1);
+                let x2 = interpolation.interpolate(input, base as isize + 2);
+                let x3 = interpolation.interpolate(input, base as isize + 3);
+                let x4 = interpolation.interpolate(input, base as isize + 4);
+                let x5 = interpolation.interpolate(input, base as isize + 5);
+                let x6 = interpolation.interpolate(input, base as isize + 6);
+                let x7 = interpolation.interpolate(input, base as isize + 7);
+
+                let val0 = vld1q_f32([x0, x1, x2, x3].as_ptr());
+                let val1 = vld1q_f32([x4, x5, x6, x7].as_ptr());
+
+                let a = vfmaq_f32(vmulq_f32(val0, h), val1, h2);
+                let d = vfmaq_f32(vmulq_f32(val0, g), val1, g2);
+
+                let q0 = vpadd_f32(
+                    vadd_f32(vget_low_f32(a), vget_high_f32(a)),
+                    vadd_f32(vget_low_f32(d), vget_high_f32(d)),
+                );
+
+                vst1_lane_f32::<0>(approx, q0);
+                vst1_lane_f32::<1>(detail, q0);
             }
         }
         Ok(())
+    }
+
+    fn required_scratch_size(&self, _: usize) -> usize {
+        0
+    }
+
+    fn dwt_size(&self, input_length: usize) -> DwtSize {
+        DwtSize::new(dwt_length(input_length, self.filter_length()))
     }
 }
 
@@ -161,7 +251,7 @@ impl DwtInverseExecutor<f32> for NeonWavelet8TapsF32 {
         let rec_len = idwt_length(approx.len(), 8);
 
         if output.len() != rec_len {
-            return Err(OscletError::OutputSizeIsTooSmall(output.len(), rec_len));
+            return Err(OscletError::OutputSizeIsNotValid(output.len(), rec_len));
         }
 
         const FILTER_OFFSET: usize = 6;
@@ -195,6 +285,58 @@ impl DwtInverseExecutor<f32> for NeonWavelet8TapsF32 {
                 let g2 = vld1q_f32(self.high_pass.get_unchecked(4..).as_ptr());
 
                 let mut ui = safe_start;
+
+                while ui + 4 < safe_end {
+                    let (h, g) = (
+                        vld1q_f32(approx.get_unchecked(ui)),
+                        vld1q_f32(details.get_unchecked(ui)),
+                    );
+                    let k = 2 * ui as isize - FILTER_OFFSET as isize;
+                    let part0 = output.get_unchecked_mut(k as usize..);
+                    let q0 = vld1q_f32(part0.as_ptr());
+                    let q1 = vld1q_f32(part0.get_unchecked(4..).as_ptr());
+                    let q2 = vld1q_f32(part0.get_unchecked(8..).as_ptr());
+                    let q3 = vld1_f32(part0.get_unchecked(12..).as_ptr());
+
+                    let w0 = vfmaq_laneq_f32::<0>(vfmaq_laneq_f32::<0>(q0, h0, h), g0, g);
+                    let w1 = vfmaq_laneq_f32::<0>(vfmaq_laneq_f32::<0>(q1, h2, h), g2, g);
+
+                    let interim_w0 = vcombine_f32(vget_high_f32(w0), vget_low_f32(w1));
+                    let interim_w1 = vcombine_f32(vget_high_f32(w1), vget_low_f32(q2));
+
+                    let w3 = vfmaq_laneq_f32::<1>(vfmaq_laneq_f32::<1>(interim_w0, h0, h), g0, g);
+                    let w4 = vfmaq_laneq_f32::<1>(vfmaq_laneq_f32::<1>(interim_w1, h2, h), g2, g);
+
+                    // first item is done
+                    let packed0 = vcombine_f32(vget_low_f32(w0), vget_low_f32(w3));
+                    vst1q_f32(part0.as_mut_ptr(), packed0);
+
+                    let interim_w2 = vcombine_f32(vget_high_f32(w3), vget_low_f32(w4));
+                    let interim_w3 = vcombine_f32(vget_high_f32(w4), vget_high_f32(q2));
+
+                    let w5 = vfmaq_laneq_f32::<2>(vfmaq_laneq_f32::<2>(interim_w2, h0, h), g0, g);
+                    let w6 = vfmaq_laneq_f32::<2>(vfmaq_laneq_f32::<2>(interim_w3, h2, h), g2, g);
+
+                    let interim_w4 = vcombine_f32(vget_high_f32(w5), vget_low_f32(w6));
+                    let interim_w5 = vcombine_f32(vget_high_f32(w6), q3);
+
+                    let w7 = vfmaq_laneq_f32::<3>(vfmaq_laneq_f32::<3>(interim_w4, h0, h), g0, g);
+                    let w8 = vfmaq_laneq_f32::<3>(vfmaq_laneq_f32::<3>(interim_w5, h2, h), g2, g);
+
+                    // second item low w5, low w7
+                    let packed1 = vcombine_f32(vget_low_f32(w5), vget_low_f32(w7));
+                    vst1q_f32(part0.get_unchecked_mut(4..).as_mut_ptr(), packed1);
+
+                    // third item high w7, low w8
+                    let packed2 = vcombine_f32(vget_high_f32(w7), vget_low_f32(w8));
+                    vst1q_f32(part0.get_unchecked_mut(8..).as_mut_ptr(), packed2);
+
+                    vst1q_lane_f64::<1>(
+                        part0.get_unchecked_mut(12..).as_mut_ptr().cast(),
+                        vreinterpretq_f64_f32(w8),
+                    );
+                    ui += 4;
+                }
 
                 while ui + 2 < safe_end {
                     let (h, g) = (
@@ -256,6 +398,10 @@ impl DwtInverseExecutor<f32> for NeonWavelet8TapsF32 {
         }
         Ok(())
     }
+
+    fn idwt_size(&self, input_length: DwtSize) -> usize {
+        idwt_length(input_length.approx_length, self.filter_length())
+    }
 }
 
 impl IncompleteDwtExecutor<f32> for NeonWavelet8TapsF32 {
@@ -268,6 +414,7 @@ impl IncompleteDwtExecutor<f32> for NeonWavelet8TapsF32 {
 mod tests {
     use super::*;
     use crate::{DaubechiesFamily, WaveletFilterProvider};
+    use rand::Rng;
 
     #[test]
     fn test_db8_odd() {
@@ -406,10 +553,10 @@ mod tests {
 
     #[test]
     fn test_db8_even_big() {
-        let data_length = 86;
+        let data_length = 141;
         let mut input = vec![0.; data_length];
         for i in 0..data_length {
-            input[i] = i as f32 / data_length as f32;
+            input[i] = rand::rng().random_range(0f32..4f32);
         }
         let db4 = NeonWavelet8TapsF32::new(
             BorderMode::Wrap,
@@ -430,7 +577,7 @@ mod tests {
             .unwrap();
         reconstructed.iter().take(input.len()).enumerate().for_each(|(i, x)| {
             assert!(
-                (input[i] - x).abs() < 1e-3,
+                (input[i] - x).abs() < 1e-5,
                 "reconstructed difference expected to be < 1e-3, but values were ref {}, derived {}",
                 input[i],
                 x

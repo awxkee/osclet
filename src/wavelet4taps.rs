@@ -26,16 +26,15 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use crate::border_mode::BorderMode;
-use crate::err::OscletError;
-use crate::filter_padding::{MakeArenaFactoryProvider, make_arena_1d};
+use crate::border_mode::{BorderInterpolation, BorderMode};
+use crate::err::{OscletError, try_vec};
 use crate::mla::fmla;
-use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr};
-use crate::{DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor};
-use num_traits::{AsPrimitive, MulAdd};
-use std::fmt::Debug;
+use crate::util::{dwt_length, four_taps_size_for_input, idwt_length, low_pass_to_high_from_arr};
+use crate::{
+    DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor, WaveletSample,
+};
+use num_traits::AsPrimitive;
 use std::marker::PhantomData;
-use std::ops::{Add, Mul};
 
 pub(crate) struct Wavelet4Taps<T> {
     phantom_data: PhantomData<T>,
@@ -44,7 +43,7 @@ pub(crate) struct Wavelet4Taps<T> {
     high_pass: [T; 4],
 }
 
-impl<T: Copy + 'static + Debug + Default + Mul<T, Output = T>> Wavelet4Taps<T>
+impl<T: WaveletSample> Wavelet4Taps<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -59,15 +58,7 @@ where
     }
 }
 
-impl<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + MakeArenaFactoryProvider<T>,
-> DwtForwardExecutor<T> for Wavelet4Taps<T>
+impl<T: WaveletSample> DwtForwardExecutor<T> for Wavelet4Taps<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -76,6 +67,17 @@ where
         input: &[T],
         approx: &mut [T],
         details: &mut [T],
+    ) -> Result<(), OscletError> {
+        let mut scratch = try_vec![T::default(); self.required_scratch_size(input.len())];
+        self.execute_forward_with_scratch(input, approx, details, &mut scratch)
+    }
+
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[T],
+        approx: &mut [T],
+        details: &mut [T],
+        scratch: &mut [T],
     ) -> Result<(), OscletError> {
         let half = dwt_length(input.len(), 4);
 
@@ -90,20 +92,58 @@ where
             return Err(OscletError::ApproxDetailsSize(details.len()));
         }
 
-        let padded_input = make_arena_1d(
-            input,
-            2,
-            if !input.len().is_multiple_of(2) { 3 } else { 2 },
-            self.border_mode,
-        )?;
+        let required_size = self.required_scratch_size(input.len());
+        if scratch.len() < required_size {
+            return Err(OscletError::ScratchSize(required_size, scratch.len()));
+        }
 
         unsafe {
+            let interpolation = BorderInterpolation::new(self.border_mode, 0, input.len() as isize);
+
+            let (front_approx, approx) = approx.split_at_mut(1);
+            let (front_detail, details) = details.split_at_mut(1);
+
+            for (i, (approx, detail)) in front_approx
+                .iter_mut()
+                .zip(front_detail.iter_mut())
+                .enumerate()
+            {
+                let mut a = 0.0f64.as_();
+                let mut d = 0.0f64.as_();
+                let base = 2 * i as isize - 2;
+
+                let x0 = interpolation.interpolate(input, base);
+                let x1 = interpolation.interpolate(input, base + 1);
+                let x2 = *input.get_unchecked((base + 2) as usize);
+                let x3 = *input.get_unchecked((base + 3) as usize);
+
+                a = fmla(self.low_pass[0], x0, a);
+                d = fmla(self.high_pass[0], x0, d);
+
+                a = fmla(self.low_pass[1], x1, a);
+                d = fmla(self.high_pass[1], x1, d);
+
+                a = fmla(self.low_pass[2], x2, a);
+                d = fmla(self.high_pass[2], x2, d);
+
+                a = fmla(self.low_pass[3], x3, a);
+                d = fmla(self.high_pass[3], x3, d);
+
+                *approx = a;
+                *detail = d;
+            }
+
+            let (approx, approx_rem) =
+                approx.split_at_mut(four_taps_size_for_input(input.len(), approx.len()));
+            let (details, details_rem) =
+                details.split_at_mut(four_taps_size_for_input(input.len(), details.len()));
+
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
                 let mut a = 0.0f64.as_();
                 let mut d = 0.0f64.as_();
                 let base = 2 * i;
 
-                let input = padded_input.get_unchecked(base..);
+                let input = input.get_unchecked(base..);
 
                 let x0 = input.get_unchecked(0);
                 let x1 = input.get_unchecked(1);
@@ -125,13 +165,52 @@ where
                 *approx = a;
                 *detail = d;
             }
+
+            let base_start = approx.len();
+
+            for (i, (approx, detail)) in approx_rem
+                .iter_mut()
+                .zip(details_rem.iter_mut())
+                .enumerate()
+            {
+                let mut a = 0.0f64.as_();
+                let mut d = 0.0f64.as_();
+                let base = 2 * (i + base_start);
+
+                let x0 = *input.get_unchecked(base);
+                let x1 = interpolation.interpolate(input, base as isize + 1);
+                let x2 = interpolation.interpolate(input, base as isize + 2);
+                let x3 = interpolation.interpolate(input, base as isize + 3);
+
+                a = fmla(self.low_pass[0], x0, a);
+                d = fmla(self.high_pass[0], x0, d);
+
+                a = fmla(self.low_pass[1], x1, a);
+                d = fmla(self.high_pass[1], x1, d);
+
+                a = fmla(self.low_pass[2], x2, a);
+                d = fmla(self.high_pass[2], x2, d);
+
+                a = fmla(self.low_pass[3], x3, a);
+                d = fmla(self.high_pass[3], x3, d);
+
+                *approx = a;
+                *detail = d;
+            }
         }
         Ok(())
     }
+
+    fn required_scratch_size(&self, _: usize) -> usize {
+        0
+    }
+
+    fn dwt_size(&self, input_length: usize) -> DwtSize {
+        DwtSize::new(dwt_length(input_length, self.filter_length()))
+    }
 }
 
-impl<T: Copy + 'static + MulAdd<T, Output = T> + Add<T, Output = T> + Mul<T, Output = T> + Default>
-    DwtInverseExecutor<T> for Wavelet4Taps<T>
+impl<T: WaveletSample> DwtInverseExecutor<T> for Wavelet4Taps<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -151,7 +230,7 @@ where
         let rec_len = idwt_length(approx.len(), 4);
 
         if output.len() != rec_len {
-            return Err(OscletError::OutputSizeIsTooSmall(output.len(), rec_len));
+            return Err(OscletError::OutputSizeIsNotValid(output.len(), rec_len));
         }
 
         const FILTER_OFFSET: usize = 2;
@@ -225,19 +304,13 @@ where
         }
         Ok(())
     }
+
+    fn idwt_size(&self, input_length: DwtSize) -> usize {
+        idwt_length(input_length.approx_length, self.filter_length())
+    }
 }
 
-impl<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + Send
-        + Sync
-        + MakeArenaFactoryProvider<T>,
-> IncompleteDwtExecutor<T> for Wavelet4Taps<T>
+impl<T: WaveletSample> IncompleteDwtExecutor<T> for Wavelet4Taps<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -304,9 +377,6 @@ mod tests {
                 x
             );
         });
-
-        println!("{:?}", approx);
-        println!("{:?}", details);
 
         let mut reconstructed = vec![
             0.0;

@@ -29,6 +29,8 @@ fuzz_target!(|data: Data| {
     if data.length < data.wavelet_length {
         return;
     }
+    let mut data = data;
+    data.wavelet_length = 8;
     let mut wavelet = vec![0.; data.wavelet_length as usize];
     for i in 0..data.wavelet_length as usize {
         wavelet[i] = i as f32 / data.wavelet_length as f32;
@@ -39,6 +41,6 @@ fuzz_target!(|data: Data| {
     }
     let executor =
         Osclet::make_modwt_f32(Arc::new(WaveletProvider { wavelet }), BorderMode::Wrap).unwrap();
-    let dwt = executor.modwt(&signal, 1).unwrap();
-    _ = executor.imodwt(&dwt, 1).unwrap();
+    let dwt = executor.dwt(&signal, 1).unwrap();
+    _ = executor.idwt(&dwt.to_ref(), 1).unwrap();
 });

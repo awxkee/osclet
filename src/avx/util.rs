@@ -93,6 +93,12 @@ pub(crate) fn _mm256_hpadd2_ps(v0: __m256, v1: __m256) -> __m256 {
 
 #[inline]
 #[target_feature(enable = "avx2")]
+pub(crate) fn _mm256_permute_ps64<const MASK: i32>(v: __m256) -> __m256 {
+    _mm256_castpd_ps(_mm256_permute4x64_pd::<MASK>(_mm256_castps_pd(v)))
+}
+
+#[inline]
+#[target_feature(enable = "avx2")]
 pub(crate) fn _mm256_hpadd2_pd(v0: __m256d, v1: __m256d) -> __m256d {
     let wa0 = _mm256_hadd_pd(v0, v1);
     _mm256_permute4x64_pd::<{ shuffle(3, 1, 2, 0) }>(wa0)
@@ -111,4 +117,16 @@ pub(crate) fn afmla<T: Copy + Mul<T, Output = T> + Add<T, Output = T> + MulAdd<T
 #[target_feature(enable = "sse2")]
 pub(crate) unsafe fn _mm_unpackhilo_ps64(a: __m128, b: __m128) -> __m128 {
     _mm_shuffle_ps::<{ shuffle(1, 0, 3, 2) }>(a, b)
+}
+
+#[inline]
+#[target_feature(enable = "sse2")]
+pub(crate) fn _mm_unpack2lo_ps(a: __m128, b: __m128) -> __m128 {
+    _mm_shuffle_ps::<{ shuffle(1, 0, 1, 0) }>(a, b)
+}
+
+#[inline]
+#[target_feature(enable = "sse2")]
+pub(crate) fn _mm_unpack2hi_ps(a: __m128, b: __m128) -> __m128 {
+    _mm_shuffle_ps::<{ shuffle(3, 2, 3, 2) }>(a, b)
 }

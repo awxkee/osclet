@@ -26,10 +26,11 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+use crate::WaveletSample;
 use crate::err::{OscletError, try_vec};
 use num_traits::AsPrimitive;
 use std::fmt::Debug;
-use std::ops::{Mul, Neg};
+use std::ops::Mul;
 
 /// Computes the length of the **approximation/detail coefficients** after a single-level
 /// discrete wavelet transform (DWT) on a 1D signal.
@@ -56,9 +57,7 @@ pub fn idwt_length(approx_length: usize, filter_length: usize) -> usize {
     2 * approx_length - (filter_length - 2)
 }
 
-pub(crate) fn low_pass_to_high<T: Copy + 'static + Debug + Default + Mul<T, Output = T>>(
-    pass: &[T],
-) -> Vec<T>
+pub(crate) fn low_pass_to_high<T: WaveletSample>(pass: &[T]) -> Vec<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -105,9 +104,7 @@ pub(crate) struct Wavelet<T> {
     pub(crate) rec_hi: Vec<T>,
 }
 
-pub(crate) fn fill_wavelet<T: Copy + Default + Clone + Neg<Output = T>>(
-    src: &[T],
-) -> Result<Wavelet<T>, OscletError> {
+pub(crate) fn fill_wavelet<T: WaveletSample>(src: &[T]) -> Result<Wavelet<T>, OscletError> {
     let rec_len = src.len();
     let dec_len = src.len();
 
@@ -138,4 +135,74 @@ pub(crate) fn fill_wavelet<T: Copy + Default + Clone + Neg<Output = T>>(
         rec_hi: w_rec_hi,
         rec_lo: w_rec_lo,
     })
+}
+
+#[inline]
+pub(crate) fn two_taps_size_for_input(input: usize, size: usize) -> usize {
+    if !input.is_multiple_of(2) {
+        size - 1
+    } else {
+        size
+    }
+}
+
+#[inline]
+pub(crate) fn four_taps_size_for_input(input: usize, size: usize) -> usize {
+    if !input.is_multiple_of(2) {
+        size - 3
+    } else {
+        size - 2
+    }
+}
+
+#[inline]
+pub(crate) fn sixth_taps_size_for_input(input: usize, size: usize) -> usize {
+    const FILTER_SIZE: usize = 6;
+
+    let whole_pad_size = (2 * size + FILTER_SIZE - 2) - input;
+    let left_pad = whole_pad_size / 2;
+    let right_pad = whole_pad_size - left_pad;
+    size - right_pad
+}
+
+#[inline]
+pub(crate) fn eight_taps_size_for_input(input: usize, size: usize) -> usize {
+    const FILTER_SIZE: usize = 8;
+
+    let whole_size = (2 * size + FILTER_SIZE - 2) - input;
+    let left_pad = whole_size / 2;
+    let right_pad = whole_size - left_pad;
+    size - right_pad
+}
+
+#[inline]
+pub(crate) fn ten_taps_size_for_input(input: usize, size: usize) -> usize {
+    const FILTER_SIZE: usize = 10;
+
+    let whole_size = (2 * size + FILTER_SIZE - 2) - input;
+    let left_pad = whole_size / 2;
+    let right_pad = whole_size - left_pad;
+    size - right_pad
+}
+
+#[inline]
+pub(crate) fn twelve_taps_size_for_input(input: usize, size: usize) -> usize {
+    const FILTER_SIZE: usize = 12;
+
+    let whole_size = (2 * size + FILTER_SIZE - 2) - input;
+    let left_pad = whole_size / 2;
+    let right_pad = whole_size - left_pad;
+
+    size - right_pad
+}
+
+#[inline]
+pub(crate) fn sixteen_taps_size_for_input(input: usize, size: usize) -> usize {
+    const FILTER_SIZE: usize = 16;
+
+    let whole_size = (2 * size + FILTER_SIZE - 2) - input;
+    let left_pad = whole_size / 2;
+    let right_pad = whole_size - left_pad;
+
+    size - right_pad
 }

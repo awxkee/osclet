@@ -26,11 +26,11 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use crate::err::OscletError;
-use crate::filter_padding::make_arena_1d;
+use crate::err::{OscletError, try_vec};
 use crate::mla::fmla;
-use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr};
-use crate::{BorderMode, DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor};
+use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr, two_taps_size_for_input};
+use crate::{BorderMode, DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor};
+use num_traits::AsPrimitive;
 use std::arch::aarch64::*;
 
 pub(crate) struct NeonWavelet2TapsF64 {
@@ -56,6 +56,17 @@ impl DwtForwardExecutor<f64> for NeonWavelet2TapsF64 {
         approx: &mut [f64],
         details: &mut [f64],
     ) -> Result<(), OscletError> {
+        let mut scratch = try_vec![f64::default(); self.required_scratch_size(input.len())];
+        self.execute_forward_with_scratch(input, approx, details, &mut scratch)
+    }
+
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[f64],
+        approx: &mut [f64],
+        details: &mut [f64],
+        scratch: &mut [f64],
+    ) -> Result<(), OscletError> {
         let half = dwt_length(input.len(), 2);
 
         if input.len() < 2 {
@@ -69,16 +80,19 @@ impl DwtForwardExecutor<f64> for NeonWavelet2TapsF64 {
             return Err(OscletError::ApproxDetailsSize(details.len()));
         }
 
-        let padded_input = make_arena_1d(
-            input,
-            0,
-            if !input.len().is_multiple_of(2) { 1 } else { 0 },
-            self.border_mode,
-        )?;
+        let required_size = self.required_scratch_size(input.len());
+        if scratch.len() < required_size {
+            return Err(OscletError::ScratchSize(required_size, scratch.len()));
+        }
 
         unsafe {
             let l0 = vld1q_f64(self.low_pass.as_ptr());
             let h0 = vld1q_f64(self.high_pass.as_ptr());
+
+            let (approx, approx_rem) =
+                approx.split_at_mut(two_taps_size_for_input(input.len(), approx.len()));
+            let (details, details_rem) =
+                details.split_at_mut(two_taps_size_for_input(input.len(), details.len()));
 
             for (i, (approx, detail)) in approx
                 .chunks_exact_mut(2)
@@ -87,8 +101,8 @@ impl DwtForwardExecutor<f64> for NeonWavelet2TapsF64 {
             {
                 let base0 = 2 * 2 * i;
 
-                let input0 = padded_input.get_unchecked(base0..);
-                let input1 = padded_input.get_unchecked(base0 + 2..);
+                let input0 = input.get_unchecked(base0..);
+                let input1 = input.get_unchecked(base0 + 2..);
 
                 let xw0 = vld1q_f64(input0.as_ptr());
                 let xw1 = vld1q_f64(input1.as_ptr());
@@ -111,7 +125,7 @@ impl DwtForwardExecutor<f64> for NeonWavelet2TapsF64 {
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
                 let base = processed + 2 * i;
 
-                let input = padded_input.get_unchecked(base..);
+                let input = input.get_unchecked(base..);
 
                 let xw = vld1q_f64(input.as_ptr());
 
@@ -121,8 +135,39 @@ impl DwtForwardExecutor<f64> for NeonWavelet2TapsF64 {
                 *approx = a;
                 *detail = d;
             }
+
+            if !details_rem.is_empty() && !approx_rem.is_empty() {
+                let i = half - 1;
+                let x0 = input.get_unchecked(2 * i);
+                let x1 = self.border_mode.interpolate(
+                    input,
+                    2 * i as isize + 1,
+                    0,
+                    input.len() as isize,
+                );
+
+                let mut a = 0.0f64.as_();
+                let mut d = 0.0f64.as_();
+
+                a = fmla(self.low_pass[0], *x0, a);
+                d = fmla(self.high_pass[0], *x0, d);
+
+                a = fmla(self.low_pass[1], x1, a);
+                d = fmla(self.high_pass[1], x1, d);
+
+                *approx_rem.last_mut().unwrap() = a;
+                *details_rem.last_mut().unwrap() = d;
+            }
         }
         Ok(())
+    }
+
+    fn required_scratch_size(&self, _: usize) -> usize {
+        0
+    }
+
+    fn dwt_size(&self, input_length: usize) -> DwtSize {
+        DwtSize::new(dwt_length(input_length, self.filter_length()))
     }
 }
 
@@ -143,7 +188,7 @@ impl DwtInverseExecutor<f64> for NeonWavelet2TapsF64 {
         let rec_len = idwt_length(approx.len(), 2);
 
         if output.len() != rec_len {
-            return Err(OscletError::OutputSizeIsTooSmall(output.len(), rec_len));
+            return Err(OscletError::OutputSizeIsNotValid(output.len(), rec_len));
         }
 
         const FILTER_OFFSET: usize = 0;
@@ -222,6 +267,10 @@ impl DwtInverseExecutor<f64> for NeonWavelet2TapsF64 {
         }
         Ok(())
     }
+
+    fn idwt_size(&self, input_length: DwtSize) -> usize {
+        idwt_length(input_length.approx_length, self.filter_length())
+    }
 }
 
 impl IncompleteDwtExecutor<f64> for NeonWavelet2TapsF64 {
@@ -254,6 +303,17 @@ impl DwtForwardExecutor<f32> for NeonWavelet2TapsF32 {
         approx: &mut [f32],
         details: &mut [f32],
     ) -> Result<(), OscletError> {
+        let mut scratch = try_vec![f32::default(); self.required_scratch_size(input.len())];
+        self.execute_forward_with_scratch(input, approx, details, &mut scratch)
+    }
+
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[f32],
+        approx: &mut [f32],
+        details: &mut [f32],
+        scratch: &mut [f32],
+    ) -> Result<(), OscletError> {
         let half = dwt_length(input.len(), 2);
 
         if input.len() < 2 {
@@ -267,12 +327,15 @@ impl DwtForwardExecutor<f32> for NeonWavelet2TapsF32 {
             return Err(OscletError::ApproxDetailsSize(details.len()));
         }
 
-        let padded_input = make_arena_1d(
-            input,
-            0,
-            if !input.len().is_multiple_of(2) { 1 } else { 0 },
-            self.border_mode,
-        )?;
+        let required_size = self.required_scratch_size(input.len());
+        if scratch.len() < required_size {
+            return Err(OscletError::ScratchSize(required_size, scratch.len()));
+        }
+
+        let (approx, approx_rem) =
+            approx.split_at_mut(two_taps_size_for_input(input.len(), approx.len()));
+        let (details, details_rem) =
+            details.split_at_mut(two_taps_size_for_input(input.len(), details.len()));
 
         unsafe {
             let l0 = vld1q_f32(self.low_pass.as_ptr());
@@ -287,7 +350,7 @@ impl DwtForwardExecutor<f32> for NeonWavelet2TapsF32 {
             {
                 let base0 = 2 * 8 * i;
 
-                let input0 = padded_input.get_unchecked(base0..);
+                let input0 = input.get_unchecked(base0..);
 
                 let xw0 = vld1q_f32(input0.as_ptr());
                 let xw1 = vld1q_f32(input0.get_unchecked(4..).as_ptr());
@@ -322,7 +385,7 @@ impl DwtForwardExecutor<f32> for NeonWavelet2TapsF32 {
 
             let approx = approx.chunks_exact_mut(8).into_remainder();
             let details = details.chunks_exact_mut(8).into_remainder();
-            let padded_input = padded_input.get_unchecked(processed * 2..);
+            let padded_input = input.get_unchecked(processed * 2..);
             processed = 0;
 
             for (i, (approx, detail)) in approx
@@ -361,14 +424,47 @@ impl DwtForwardExecutor<f32> for NeonWavelet2TapsF32 {
 
                 let xw = vld1_f32(input.as_ptr());
 
-                let a = vpadds_f32(vmul_f32(xw, vget_low_f32(l0)));
-                let d = vpadds_f32(vmul_f32(xw, vget_low_f32(h0)));
+                let a = vmul_f32(xw, vget_low_f32(l0));
+                let d = vmul_f32(xw, vget_low_f32(h0));
 
-                *approx = a;
-                *detail = d;
+                let q0 = vpadd_f32(a, d);
+
+                vst1_lane_f32::<0>(approx, q0);
+                vst1_lane_f32::<1>(detail, q0);
+            }
+
+            if !details_rem.is_empty() && !approx_rem.is_empty() {
+                let i = half - 1;
+                let x0 = input.get_unchecked(2 * i);
+                let x1 = self.border_mode.interpolate(
+                    input,
+                    2 * i as isize + 1,
+                    0,
+                    input.len() as isize,
+                );
+
+                let mut a = 0.0f64.as_();
+                let mut d = 0.0f64.as_();
+
+                a = fmla(self.low_pass[0], *x0, a);
+                d = fmla(self.high_pass[0], *x0, d);
+
+                a = fmla(self.low_pass[1], x1, a);
+                d = fmla(self.high_pass[1], x1, d);
+
+                *approx_rem.last_mut().unwrap() = a;
+                *details_rem.last_mut().unwrap() = d;
             }
         }
         Ok(())
+    }
+
+    fn required_scratch_size(&self, _: usize) -> usize {
+        0
+    }
+
+    fn dwt_size(&self, input_length: usize) -> DwtSize {
+        DwtSize::new(dwt_length(input_length, self.filter_length()))
     }
 }
 
@@ -389,7 +485,7 @@ impl DwtInverseExecutor<f32> for NeonWavelet2TapsF32 {
         let rec_len = idwt_length(approx.len(), 2);
 
         if output.len() != rec_len {
-            return Err(OscletError::OutputSizeIsTooSmall(output.len(), rec_len));
+            return Err(OscletError::OutputSizeIsNotValid(output.len(), rec_len));
         }
 
         const FILTER_OFFSET: usize = 0;
@@ -474,6 +570,10 @@ impl DwtInverseExecutor<f32> for NeonWavelet2TapsF32 {
         }
         Ok(())
     }
+
+    fn idwt_size(&self, input_length: DwtSize) -> usize {
+        idwt_length(input_length.approx_length, self.filter_length())
+    }
 }
 
 impl IncompleteDwtExecutor<f32> for NeonWavelet2TapsF32 {
@@ -547,9 +647,6 @@ mod tests {
             );
         });
 
-        println!("{:?}", approx);
-        println!("{:?}", details);
-
         let mut reconstructed = vec![
             0.0;
             if input.len() % 2 != 0 {
@@ -588,8 +685,6 @@ mod tests {
         let mut details = vec![0.0; out_length];
         db1.execute_forward(&input, &mut approx, &mut details)
             .unwrap();
-        println!("approx {:?}", approx);
-        println!("approx {:?}", details);
 
         const REFERENCE_APPROX: [f64; 8] = [
             2.12132034, 4.94974747, 2.12132034, 0.70710678, 6.29325035, 6.22253967, 4.10121933,
@@ -695,9 +790,6 @@ mod tests {
             );
         });
 
-        println!("{:?}", approx);
-        println!("{:?}", details);
-
         let mut reconstructed = vec![
             0.0;
             if input.len() % 2 != 0 {
@@ -736,8 +828,6 @@ mod tests {
         let mut details = vec![0.0; out_length];
         db1.execute_forward(&input, &mut approx, &mut details)
             .unwrap();
-        println!("approx {:?}", approx);
-        println!("approx {:?}", details);
 
         const REFERENCE_APPROX: [f32; 8] = [
             2.12132034, 4.94974747, 2.12132034, 0.70710678, 6.29325035, 6.22253967, 4.10121933,
@@ -803,8 +893,6 @@ mod tests {
         let mut details = vec![0.0; out_length];
         db1.execute_forward(&input, &mut approx, &mut details)
             .unwrap();
-        println!("approx {:?}", approx);
-        println!("approx {:?}", details);
 
         const REFERENCE_APPROX: [f32; 9] = [
             2.12132034, 4.94974747, 2.12132034, 0.70710678, 6.29325035, 6.22253967, 4.10121933,

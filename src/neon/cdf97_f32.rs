@@ -29,7 +29,8 @@
 use crate::err::{OscletError, try_vec};
 use crate::mla::fmla;
 use crate::{
-    Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor, MultiDwt,
+    Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor,
+    MultiDwt,
 };
 use std::arch::aarch64::*;
 
@@ -263,6 +264,27 @@ impl DwtForwardExecutor<f32> for NeonCdf97F32 {
 
         Ok(())
     }
+
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[f32],
+        approx: &mut [f32],
+        details: &mut [f32],
+        _: &mut [f32],
+    ) -> Result<(), OscletError> {
+        self.execute_forward(input, approx, details)
+    }
+
+    fn required_scratch_size(&self, _: usize) -> usize {
+        0
+    }
+
+    fn dwt_size(&self, input_length: usize) -> DwtSize {
+        DwtSize {
+            approx_length: input_length.div_ceil(2).max(2),
+            details_length: (input_length / 2).max(2),
+        }
+    }
 }
 
 impl DwtInverseExecutor<f32> for NeonCdf97F32 {
@@ -275,7 +297,7 @@ impl DwtInverseExecutor<f32> for NeonCdf97F32 {
     ) -> Result<(), OscletError> {
         let n = approx.len() + details.len();
         if n != output.len() {
-            return Err(OscletError::OutputSizeIsTooSmall(output.len(), n));
+            return Err(OscletError::OutputSizeIsNotValid(output.len(), n));
         }
         if n < 4 {
             return Err(OscletError::MinFilterSize(n, 4));
@@ -312,6 +334,10 @@ impl DwtInverseExecutor<f32> for NeonCdf97F32 {
         }
 
         Ok(())
+    }
+
+    fn idwt_size(&self, input_length: DwtSize) -> usize {
+        (input_length.approx_length + input_length.details_length).max(4)
     }
 }
 

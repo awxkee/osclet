@@ -26,15 +26,23 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+#![allow(clippy::needless_range_loop)]
 #![allow(clippy::excessive_precision)]
+#![deny(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    clippy::print_literal,
+    clippy::print_in_format_impl
+)]
 
 use num_traits::{AsPrimitive, MulAdd};
 use std::fmt::Debug;
-use std::ops::{Add, Mul, Neg};
+use std::ops::{Add, Mul, Neg, Sub};
 use std::sync::Arc;
 
 #[cfg(all(target_arch = "x86_64", feature = "avx"))]
 mod avx;
+mod beylkin;
 mod biorthogonal;
 mod border_mode;
 mod cdf53f;
@@ -53,15 +61,43 @@ mod mla;
 mod modwt;
 #[cfg(all(target_arch = "aarch64", feature = "neon"))]
 mod neon;
+#[cfg(all(any(target_arch = "x86", target_arch = "x86_64"), feature = "sse"))]
+mod sse;
 mod symlets;
+mod t2;
+mod transpose;
 mod util;
+mod vaidyanathan;
 mod wavelet10taps;
 mod wavelet12taps;
+mod wavelet16taps;
 mod wavelet2taps;
 mod wavelet4taps;
 mod wavelet6taps;
 mod wavelet8taps;
 mod wavelet_n_taps;
+
+pub(crate) trait WaveletSample:
+    Copy
+    + 'static
+    + MulAdd<Self, Output = Self>
+    + Add<Self, Output = Self>
+    + Sub<Self, Output = Self>
+    + Mul<Self, Output = Self>
+    + Neg<Output = Self>
+    + Default
+    + MakeArenaFactoryProvider<Self>
+    + ConvolveFactory<Self>
+    + Sqrt2Provider<Self>
+    + Default
+    + Send
+    + Debug
+    + Sync
+{
+}
+
+impl WaveletSample for f32 {}
+impl WaveletSample for f64 {}
 
 use crate::cdf53f::Cdf53;
 use crate::cdf53i::Cdf53Integer;
@@ -69,8 +105,12 @@ use crate::cdf97f::Cdf97;
 use crate::completed::CompletedDwtExecutor;
 use crate::convolve1d::ConvolveFactory;
 use crate::factory::DwtFactory;
+use crate::filter_padding::MakeArenaFactoryProvider;
 use crate::modwt::{MoDwtHandler, Sqrt2Provider};
+use crate::t2::Wavelet2DTransform;
+use crate::transpose::TransposeFactory;
 use crate::util::fill_wavelet;
+pub use beylkin::Beylkin;
 pub use biorthogonal::BiorthogonalFamily;
 pub use border_mode::BorderMode;
 pub use coiflet::CoifletFamily;
@@ -79,7 +119,9 @@ pub use dmey::DiscreteMeyerWavelet;
 pub use err::OscletError;
 pub use modwt::MoDwtExecutor;
 pub use symlets::SymletFamily;
+pub use t2::{Dwt2DExecutor, FilterBank2D, FilterBank2DMut};
 pub use util::{dwt_length, idwt_length};
+pub use vaidyanathan::Vaidyanathan;
 
 /// Provides wavelet filter coefficients for discrete wavelet transforms.
 ///
@@ -91,6 +133,35 @@ where
 {
     /// Returns the wavelet filter coefficients as a `Vec<T>`.
     fn get_wavelet(&self) -> std::borrow::Cow<'_, [T]>;
+}
+
+/// Describes the output lengths of a 1-D Discrete Wavelet Transform (DWT).
+///
+/// A single forward DWT splits an input signal into two sub-bands:
+///
+/// - **Approximation** (low-pass)
+/// - **Details** (high-pass)
+///
+/// The exact lengths of these sub-bands depend on:
+/// - the input signal length
+/// - the wavelet / filter bank
+/// - the boundary extension mode
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DwtSize {
+    // Length of the approximation (low-frequency) sub-band.
+    pub approx_length: usize,
+    // Length of the detail (high-frequency) sub-band.
+    pub details_length: usize,
+}
+
+impl DwtSize {
+    /// Creates a `DwtSize` with identical approximation and detail lengths.
+    pub fn new(size: usize) -> DwtSize {
+        Self {
+            approx_length: size,
+            details_length: size,
+        }
+    }
 }
 
 /// Trait for performing the **forward discrete wavelet transform (DWT)**.
@@ -113,6 +184,53 @@ pub trait DwtForwardExecutor<T> {
         approx: &mut [T],
         details: &mut [T],
     ) -> Result<(), OscletError>;
+
+    /// Executes the forward DWT on a 1D input signal, utilizing a provided
+    /// scratch buffer to potentially improve performance or avoid internal
+    /// memory allocation.
+    ///
+    /// The size of the `scratch` buffer must be at least the size returned by
+    /// `required_scratch_size(input.len())`.
+    ///
+    /// # Parameters
+    /// - `input`: Slice of the input signal.
+    /// - `approx`: Mutable slice to store the approximation (low-pass) coefficients.
+    /// - `details`: Mutable slice to store the detail (high-pass) coefficients.
+    /// - `scratch`: Mutable slice for temporary workspace during computation.
+    ///
+    /// # Returns
+    /// `Ok(())` on success, or an `OscletError` if sizes mismatch or computation fails.
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[T],
+        approx: &mut [T],
+        details: &mut [T],
+        scratch: &mut [T],
+    ) -> Result<(), OscletError>;
+
+    /// Computes the required size for the temporary scratch buffer needed by
+    /// `execute_forward_with_scratch`.
+    ///
+    /// This is typically used when pre-allocating memory for a sequence of DWT
+    /// operations to maximize performance.
+    ///
+    /// # Parameters
+    /// - `input_length`: Length of the input signal.
+    ///
+    /// # Returns
+    /// The minimum required length of the scratch buffer (`usize`).
+    fn required_scratch_size(&self, input_length: usize) -> usize;
+
+    /// Computes the output sizes of the approximation and detail sub-bands
+    /// for a given input length.
+    ///
+    /// # Parameters
+    /// - `input_length`: Length of the input signal.
+    ///
+    /// # Returns
+    /// A `DwtSize` describing the required lengths of the approximation and
+    /// detail output buffers.
+    fn dwt_size(&self, input_length: usize) -> DwtSize;
 }
 
 /// Trait for performing the **inverse discrete wavelet transform (IDWT)**.
@@ -135,6 +253,16 @@ pub trait DwtInverseExecutor<T> {
         details: &[T],
         output: &mut [T],
     ) -> Result<(), OscletError>;
+
+    /// Computes the required output signal length for an inverse DWT.
+    ///
+    /// # Parameters
+    /// - `input_length`: A `DwtSize` describing the lengths of the approximation
+    ///   and detail sub-bands.
+    ///
+    /// # Returns
+    /// The length of the reconstructed signal.
+    fn idwt_size(&self, input_length: DwtSize) -> usize;
 }
 
 /// Combines forward and inverse DWT operations into a single executor.
@@ -148,11 +276,34 @@ pub trait IncompleteDwtExecutor<T>:
 }
 
 /// Represents the result of a **single-level DWT**.
+#[derive(Debug, Clone)]
 pub struct Dwt<T> {
     /// Approximation (low-pass) coefficients of the signal.
     pub approximations: Vec<T>,
     /// Detail (high-pass) coefficients of the signal.
     pub details: Vec<T>,
+}
+
+impl<T> Dwt<T> {
+    /// Creates a borrowed view of this DWT result without allocating.
+    ///
+    /// This is useful when passing DWT results to APIs that only need read-only
+    /// access to the coefficient buffers, avoiding unnecessary copies.
+    pub fn to_ref(&self) -> DwtRef<'_, T> {
+        DwtRef {
+            approximations: self.approximations.as_slice(),
+            details: self.details.as_slice(),
+        }
+    }
+}
+
+/// Represents the result of a **single-level DWT**.
+#[derive(Debug, Clone)]
+pub struct DwtRef<'a, T> {
+    /// Approximation (low-pass) coefficients of the signal.
+    pub approximations: &'a [T],
+    /// Detail (high-pass) coefficients of the signal.
+    pub details: &'a [T],
 }
 
 /// Represents the result of a **multi-level DWT**.
@@ -220,6 +371,7 @@ impl Osclet {
             8 => T::wavelet_8_taps(border_mode, filter.as_ref().try_into().unwrap()),
             10 => T::wavelet_10_taps(border_mode, filter.as_ref().try_into().unwrap()),
             12 => T::wavelet_12_taps(border_mode, filter.as_ref().try_into().unwrap()),
+            16 => T::wavelet_16_taps(border_mode, filter.as_ref().try_into().unwrap()),
             _ => T::wavelet_n_taps(border_mode, filter.as_ref()),
         }
     }
@@ -243,22 +395,13 @@ impl Osclet {
             8 => T::wavelet_8_taps(border_mode, filter.as_ref().try_into().unwrap()),
             10 => T::wavelet_10_taps(border_mode, filter.as_ref().try_into().unwrap()),
             12 => T::wavelet_12_taps(border_mode, filter.as_ref().try_into().unwrap()),
+            16 => T::wavelet_16_taps(border_mode, filter.as_ref().try_into().unwrap()),
             _ => T::wavelet_n_taps(border_mode, filter.as_ref()),
         }
     }
 
     /// Internal implementation for creating a Daubechies wavelet executor.
-    fn make_daubechies_impl<
-        T: DwtFactory<T>
-            + 'static
-            + Copy
-            + Default
-            + Send
-            + Sync
-            + MulAdd<T, Output = T>
-            + Add<T, Output = T>
-            + Mul<T, Output = T>,
-    >(
+    fn make_daubechies_impl<T: DwtFactory<T> + WaveletSample>(
         db: DaubechiesFamily,
         border_mode: BorderMode,
     ) -> Arc<dyn DwtExecutor<T> + Send + Sync>
@@ -270,17 +413,7 @@ impl Osclet {
     }
 
     /// Internal implementation for creating a Coiflet wavelet executor.
-    fn make_coiflet_impl<
-        T: DwtFactory<T>
-            + 'static
-            + Copy
-            + Default
-            + Send
-            + Sync
-            + MulAdd<T, Output = T>
-            + Add<T, Output = T>
-            + Mul<T, Output = T>,
-    >(
+    fn make_coiflet_impl<T: DwtFactory<T> + WaveletSample>(
         coif: CoifletFamily,
         border_mode: BorderMode,
     ) -> Arc<dyn DwtExecutor<T> + Send + Sync>
@@ -292,17 +425,7 @@ impl Osclet {
     }
 
     /// Internal implementation for creating a Biorthogonal wavelet executor.
-    fn make_biorthogonal_impl<
-        T: DwtFactory<T>
-            + 'static
-            + Copy
-            + Default
-            + Send
-            + Sync
-            + MulAdd<T, Output = T>
-            + Add<T, Output = T>
-            + Mul<T, Output = T>,
-    >(
+    fn make_biorthogonal_impl<T: DwtFactory<T> + WaveletSample>(
         biorthogonal: BiorthogonalFamily,
         border_mode: BorderMode,
     ) -> Arc<dyn DwtExecutor<T> + Send + Sync>
@@ -314,17 +437,7 @@ impl Osclet {
     }
 
     /// Internal implementation for creating a Symlet wavelet executor.
-    fn make_symlet_impl<
-        T: DwtFactory<T>
-            + 'static
-            + Copy
-            + Default
-            + Send
-            + Sync
-            + MulAdd<T, Output = T>
-            + Add<T, Output = T>
-            + Mul<T, Output = T>,
-    >(
+    fn make_symlet_impl<T: DwtFactory<T> + WaveletSample>(
         sym: SymletFamily,
         border_mode: BorderMode,
     ) -> Arc<dyn DwtExecutor<T> + Send + Sync>
@@ -344,20 +457,7 @@ impl Osclet {
     /// # Returns
     /// A boxed `MoDwtExecutor<T>` if successful, or an `OscletError` if the wavelet
     /// is empty or has an odd number of coefficients.
-    fn make_modwt<
-        T: ConvolveFactory<T>
-            + 'static
-            + Copy
-            + Default
-            + Send
-            + Sync
-            + MulAdd<T, Output = T>
-            + Add<T, Output = T>
-            + Mul<T, Output = T>
-            + Neg<Output = T>
-            + Sqrt2Provider<T>
-            + Debug,
-    >(
+    fn make_modwt<T: WaveletSample>(
         provider: Arc<dyn WaveletFilterProvider<T> + Send + Sync>,
         border_mode: BorderMode,
     ) -> Result<Arc<dyn MoDwtExecutor<T> + Send + Sync>, OscletError>
@@ -369,6 +469,32 @@ impl Osclet {
             return Err(OscletError::ZeroOrOddSizedWavelet);
         }
         Ok(Arc::new(MoDwtHandler::new(
+            fill_wavelet(&wave)?,
+            T::make_convolution_1d(border_mode),
+        )))
+    }
+
+    /// Internal implementation for creating a SWT executor.
+    ///
+    /// # Parameters
+    /// - `provider`: Supplies the wavelet filter coefficients.
+    /// - `border_mode`: How signal boundaries are handled during convolution.
+    ///
+    /// # Returns
+    /// A boxed `MoDwtExecutor<T>` if successful, or an `OscletError` if the wavelet
+    /// is empty or has an odd number of coefficients.
+    fn make_swt<T: WaveletSample>(
+        provider: Arc<dyn WaveletFilterProvider<T> + Send + Sync>,
+        border_mode: BorderMode,
+    ) -> Result<Arc<dyn MoDwtExecutor<T> + Send + Sync>, OscletError>
+    where
+        f64: AsPrimitive<T>,
+    {
+        let wave = provider.get_wavelet();
+        if wave.is_empty() || wave.len() % 2 != 0 {
+            return Err(OscletError::ZeroOrOddSizedWavelet);
+        }
+        Ok(Arc::new(MoDwtHandler::new_stationary(
             fill_wavelet(&wave)?,
             T::make_convolution_1d(border_mode),
         )))
@@ -484,6 +610,9 @@ impl Osclet {
     /// - `provider`: A boxed provider supplying wavelet filter coefficients.
     /// - `border_mode`: How the signal edges are handled.
     ///
+    /// # Note:
+    /// The default border mode is circular wrap for this transform.
+    ///
     /// # Returns
     /// A `Result` containing a boxed `MoDwtExecutor<f32>` if successful, or an `OscletError`.
     pub fn make_modwt_f32(
@@ -495,12 +624,46 @@ impl Osclet {
 
     /// Creates a MODWT (Maximal Overlap Discrete Wavelet Transform) executor for `f64` signals using a provided wavelet filter.
     ///
+    /// # Note:
+    /// The default border mode is circular wrap for this transform.
+    ///
     /// Same as `make_modwt_f32`, but for double-precision signals.
     pub fn make_modwt_f64(
         provider: Arc<dyn WaveletFilterProvider<f64> + Send + Sync>,
         border_mode: BorderMode,
     ) -> Result<Arc<dyn MoDwtExecutor<f64> + Send + Sync>, OscletError> {
         Self::make_modwt(provider, border_mode)
+    }
+
+    /// Creates a **Stationary Wavelet Transform (SWT) executor** for `f32` signals using a provided wavelet filter.
+    ///
+    /// # Parameters
+    /// - `provider`: A boxed provider supplying wavelet filter coefficients.
+    /// - `border_mode`: Specifies how signal edges are handled (e.g., periodic, mirror, zero-padding).
+    ///
+    /// # Note:
+    /// The default border mode is circular wrap for this transform.
+    ///
+    /// # Returns
+    /// A `Result` containing a boxed `SwtExecutor<f32>` if successful, or an `OscletError`.
+    pub fn make_swt_f32(
+        provider: Arc<dyn WaveletFilterProvider<f32> + Send + Sync>,
+        border_mode: BorderMode,
+    ) -> Result<Arc<dyn MoDwtExecutor<f32> + Send + Sync>, OscletError> {
+        Self::make_swt(provider, border_mode)
+    }
+
+    /// Creates a **Stationary Wavelet Transform (SWT) executor** for `f64` signals using a provided wavelet filter.
+    ///
+    /// # Note:
+    /// The default border mode is circular wrap for this transform.
+    ///
+    /// Same as `make_swt_f32`, but for double-precision signals.
+    pub fn make_swt_f64(
+        provider: Arc<dyn WaveletFilterProvider<f64> + Send + Sync>,
+        border_mode: BorderMode,
+    ) -> Result<Arc<dyn MoDwtExecutor<f64> + Send + Sync>, OscletError> {
+        Self::make_swt(provider, border_mode)
     }
 
     /// Creates a custom wavelet executor for `f32` signals.
@@ -590,7 +753,7 @@ impl Osclet {
     ///
     /// # Description
     ///
-    /// This version is numerically identical to [`make_cdf53_i16()`] but operates
+    /// This version is numerically identical to [`Osclet::make_cdf53_i16()`] but operates
     /// directly on 32-bit integers, allowing for higher dynamic range signals.
     ///
     /// # Dynamic Range
@@ -716,5 +879,68 @@ impl Osclet {
             }
         }
         Arc::new(Cdf97::<f64>::default())
+    }
+
+    /// Create a 2-D DWT executor for `f32` data.
+    ///
+    /// # Description
+    /// Returns a boxed `Dwt2DExecutor<f32>` that performs a separable 2-D discrete
+    /// wavelet transform using the provided 1-D DWT executor. The transform is
+    /// applied row-wise and column-wise using an internal transpose operation.
+    ///
+    /// # Parameters
+    /// - `filter`: A shared 1-D DWT executor used for both horizontal and vertical passes.
+    ///
+    /// # Returns
+    /// - `Arc<dyn Dwt2DExecutor<f32> + Send + Sync>`: A thread-safe 2-D DWT executor.
+    pub fn make_2d_dwt_f32(
+        filter: Arc<dyn DwtExecutor<f32> + Send + Sync>,
+    ) -> Arc<dyn Dwt2DExecutor<f32> + Send + Sync> {
+        Arc::new(Wavelet2DTransform {
+            filter,
+            transpose: f32::transpositor(),
+        })
+    }
+
+    /// Create a 2-D DWT executor for `f64` data.
+    ///
+    /// # Description
+    /// Returns a boxed `Dwt2DExecutor<f64>` that performs a separable 2-D discrete
+    /// wavelet transform using the provided 1-D DWT executor. The transform is
+    /// applied row-wise and column-wise using an internal transpose operation.
+    ///
+    /// # Parameters
+    /// - `filter`: A shared 1-D DWT executor used for both horizontal and vertical passes.
+    ///
+    /// # Returns
+    /// - `Arc<dyn Dwt2DExecutor<f64> + Send + Sync>`: A thread-safe 2-D DWT executor.
+    pub fn make_2d_dwt_f64(
+        filter: Arc<dyn DwtExecutor<f64> + Send + Sync>,
+    ) -> Arc<dyn Dwt2DExecutor<f64> + Send + Sync> {
+        Arc::new(Wavelet2DTransform {
+            filter,
+            transpose: f64::transpositor(),
+        })
+    }
+
+    /// Create a 2-D DWT executor for `i16` data.
+    ///
+    /// # Description
+    /// Returns a boxed `Dwt2DExecutor<i16>` that performs a separable 2-D discrete
+    /// wavelet transform using the provided 1-D DWT executor. This variant is
+    /// intended for integer or fixed-point wavelet pipelines.
+    ///
+    /// # Parameters
+    /// - `filter`: A shared 1-D DWT executor used for both horizontal and vertical passes.
+    ///
+    /// # Returns
+    /// - `Arc<dyn Dwt2DExecutor<i16> + Send + Sync>`: A thread-safe 2-D DWT executor.
+    pub fn make_2d_dwt_i16(
+        filter: Arc<dyn DwtExecutor<i16> + Send + Sync>,
+    ) -> Arc<dyn Dwt2DExecutor<i16> + Send + Sync> {
+        Arc::new(Wavelet2DTransform {
+            filter,
+            transpose: i16::transpositor(),
+        })
     }
 }

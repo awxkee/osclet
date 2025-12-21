@@ -30,11 +30,11 @@ use crate::cdf53f::define_dwt_cdf_float;
 use crate::err::{OscletError, try_vec};
 use crate::mla::fmla;
 use crate::{
-    Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor, MultiDwt,
+    Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor,
+    MultiDwt, WaveletSample,
 };
-use num_traits::{AsPrimitive, MulAdd};
+use num_traits::AsPrimitive;
 use std::marker::PhantomData;
-use std::ops::{Add, Mul, Sub};
 
 const ALPHA: f64 = -1.5861343420693648;
 const BETA: f64 = -0.0529801185718856;
@@ -48,19 +48,8 @@ pub(crate) struct Cdf97<T> {
     phantom0: PhantomData<T>,
 }
 
-fn dwt97_forward_update_even<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + Sub<T, Output = T>,
->(
-    approx: &mut [T],
-    details: &mut [T],
-    c: T,
-) where
+fn dwt97_forward_update_even<T: WaveletSample>(approx: &mut [T], details: &mut [T], c: T)
+where
     f64: AsPrimitive<T>,
 {
     approx[0] = fmla(details[0] + details[0], c, approx[0]);
@@ -87,19 +76,8 @@ fn dwt97_forward_update_even<
     }
 }
 
-fn dwt97_forward_update_odd<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + Sub<T, Output = T>,
->(
-    approx: &mut [T],
-    details: &mut [T],
-    c: T,
-) where
+fn dwt97_forward_update_odd<T: WaveletSample>(approx: &mut [T], details: &mut [T], c: T)
+where
     f64: AsPrimitive<T>,
 {
     let approx_next = &approx[1..];
@@ -120,7 +98,7 @@ fn dwt97_forward_update_odd<
     }
 }
 
-fn dwt97_scale<T: Mul<T, Output = T> + Copy>(approx: &mut [T], details: &mut [T], k: T, inv_k: T) {
+fn dwt97_scale<T: WaveletSample>(approx: &mut [T], details: &mut [T], k: T, inv_k: T) {
     for (a_dst, d_dst) in approx.iter_mut().zip(details.iter_mut()) {
         *a_dst = *a_dst * k;
         *d_dst = *d_dst * inv_k;
@@ -138,15 +116,7 @@ fn dwt97_scale<T: Mul<T, Output = T> + Copy>(approx: &mut [T], details: &mut [T]
     }
 }
 
-impl<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + Sub<T, Output = T>,
-> DwtForwardExecutor<T> for Cdf97<T>
+impl<T: WaveletSample> DwtForwardExecutor<T> for Cdf97<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -210,17 +180,30 @@ where
 
         Ok(())
     }
+
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[T],
+        approx: &mut [T],
+        details: &mut [T],
+        _: &mut [T],
+    ) -> Result<(), OscletError> {
+        self.execute_forward(input, approx, details)
+    }
+
+    fn required_scratch_size(&self, _: usize) -> usize {
+        0
+    }
+
+    fn dwt_size(&self, input_length: usize) -> DwtSize {
+        DwtSize {
+            approx_length: input_length.div_ceil(2).max(2),
+            details_length: (input_length / 2).max(2),
+        }
+    }
 }
 
-impl<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + Sub<T, Output = T>,
-> DwtInverseExecutor<T> for Cdf97<T>
+impl<T: WaveletSample> DwtInverseExecutor<T> for Cdf97<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -233,7 +216,7 @@ where
     ) -> Result<(), OscletError> {
         let n = approx.len() + details.len();
         if n != output.len() {
-            return Err(OscletError::OutputSizeIsTooSmall(output.len(), n));
+            return Err(OscletError::OutputSizeIsNotValid(output.len(), n));
         }
         if n < 4 {
             return Err(OscletError::MinFilterSize(n, 4));
@@ -271,19 +254,13 @@ where
 
         Ok(())
     }
+
+    fn idwt_size(&self, input_length: DwtSize) -> usize {
+        (input_length.approx_length + input_length.details_length).max(4)
+    }
 }
 
-impl<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + Sub<T, Output = T>
-        + Send
-        + Sync,
-> IncompleteDwtExecutor<T> for Cdf97<T>
+impl<T: WaveletSample> IncompleteDwtExecutor<T> for Cdf97<T>
 where
     f64: AsPrimitive<T>,
 {

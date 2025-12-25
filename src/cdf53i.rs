@@ -28,7 +28,8 @@
  */
 use crate::err::{OscletError, try_vec};
 use crate::{
-    Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor, MultiDwt,
+    Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor,
+    MultiDwt,
 };
 use num_traits::{AsPrimitive, WrappingAdd, WrappingSub};
 use std::marker::PhantomData;
@@ -132,6 +133,27 @@ where
         }
         Ok(())
     }
+
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[T],
+        approx: &mut [T],
+        details: &mut [T],
+        _: &mut [T],
+    ) -> Result<(), OscletError> {
+        self.execute_forward(input, approx, details)
+    }
+
+    fn required_scratch_size(&self, _: usize) -> usize {
+        0
+    }
+
+    fn dwt_size(&self, input_length: usize) -> DwtSize {
+        DwtSize {
+            approx_length: input_length.div_ceil(2).max(2),
+            details_length: (input_length / 2).max(1),
+        }
+    }
 }
 
 impl<
@@ -156,7 +178,7 @@ where
     ) -> Result<(), OscletError> {
         let n = approx.len() + details.len();
         if n != output.len() {
-            return Err(OscletError::OutputSizeIsTooSmall(output.len(), n));
+            return Err(OscletError::OutputSizeIsNotValid(output.len(), n));
         }
         if n < 3 {
             return Err(OscletError::MinFilterSize(n, 3));
@@ -241,6 +263,10 @@ where
         }
 
         Ok(())
+    }
+
+    fn idwt_size(&self, input_length: DwtSize) -> usize {
+        (input_length.approx_length + input_length.details_length).max(3)
     }
 }
 

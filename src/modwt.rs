@@ -26,29 +26,62 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+use crate::completed::CompletedDwtExecutor;
 use crate::convolve1d::Convolve1d;
 use crate::err::{OscletError, try_vec};
 use crate::util::Wavelet;
-use crate::{Dwt, MultiDwt};
+use crate::{
+    Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, DwtRef, DwtSize,
+    IncompleteDwtExecutor, MultiDwt, WaveletSample,
+};
 use num_traits::AsPrimitive;
 use std::fmt::Debug;
-use std::ops::{Add, Mul, Neg};
+use std::ops::{Add, Mul};
+use std::sync::Arc;
 
-/// Trait for performing Maximal Overlap Discrete Wavelet Transform (MODWT) on 1D signals.
+/// Trait for performing **Maximal Overlap Discrete Wavelet Transform (MODWT)**
+/// and **Stationary Wavelet Transform (SWT)** on 1D signals.
 ///
-/// # Type Parameters
-/// - `T`: The numeric type of the input signal (e.g., `f32` or `f64`).
+/// This trait defines both forward and inverse transforms operating without
+/// decimation, meaning all sub-bands preserve the original signal length.
+/// The exact behavior (MODWT vs SWT) depends on the implementation
+/// (e.g. normalization, filter shifting).
 pub trait MoDwtExecutor<T> {
-    /// Computes a single-level MODWT decomposition of the input signal.
+    /// Executes a single-level forward MODWT/SWT decomposition into preallocated buffers.
+    ///
+    /// This is a low-level API intended for performance-sensitive code where
+    /// memory reuse is required. No allocations are performed.
     ///
     /// # Parameters
     /// - `input`: Slice containing the input signal.
-    /// - `level`: The decomposition level (usually starting from 1).
+    /// - `approximation`: Mutable slice to store the approximation (low-pass) coefficients.
+    /// - `details`: Mutable slice to store the detail (high-pass) coefficients.
+    /// - `level`: The decomposition level (starting from 1).
     ///
     /// # Returns
-    /// A `Result` containing a `Dwt<T>` with the wavelet and scaling coefficients
-    /// at the specified level, or an `OscletError` if computation fails.
-    fn modwt(&self, input: &[T], level: usize) -> Result<Dwt<T>, OscletError>;
+    /// - `Ok(())` on success.
+    /// - `Err(OscletError)` if buffer sizes, level, or configuration are invalid.
+    fn dwt_execute(
+        &self,
+        input: &[T],
+        approximation: &mut [T],
+        details: &mut [T],
+        level: usize,
+    ) -> Result<(), OscletError>;
+
+    /// Computes a single-level MODWT/SWT decomposition of the input signal.
+    ///
+    /// This is a convenience wrapper around [`Self::dwt_execute`] that allocates
+    /// the output buffers automatically.
+    ///
+    /// # Parameters
+    /// - `input`: Slice containing the input signal.
+    /// - `level`: The decomposition level (starting from 1).
+    ///
+    /// # Returns
+    /// A [`Dwt`] containing the approximation and detail coefficients at the
+    /// specified level, or an [`OscletError`] if computation fails.
+    fn dwt(&self, input: &[T], level: usize) -> Result<Dwt<T>, OscletError>;
 
     /// Computes a multi-level MODWT decomposition of the input signal.
     ///
@@ -59,15 +92,15 @@ pub trait MoDwtExecutor<T> {
     /// # Returns
     /// A `Result` containing a `MultiDwt<T>` representing all levels of wavelet
     /// and scaling coefficients, or an `OscletError` if computation fails.
-    fn multi_modwt(&self, input: &[T], level: usize) -> Result<MultiDwt<T>, OscletError>;
+    fn multi_dwt(&self, input: &[T], level: usize) -> Result<MultiDwt<T>, OscletError>;
 
     /// Performs a single-level inverse Maximal Overlap Discrete Wavelet Transform (IMODWT).
     ///
     /// This method reconstructs the signal from one decomposition level of approximation
-    /// and detail coefficients stored in a [`Dwt`] structure.
+    /// and detail coefficients stored in a [`DwtRef`] structure.
     ///
     /// # Parameters
-    /// - `input`: The [`Dwt`] structure containing approximation and detail coefficients for the given level.
+    /// - `input`: The [`DwtRef`] structure containing approximation and detail coefficients for the given level.
     /// - `output`: Mutable slice that will hold the reconstructed signal. Must have the same length as the input signal.
     /// - `scratch`: Temporary working buffer used for intermediate computations to avoid additional allocations, must match output size.
     /// - `level`: The decomposition level to reconstruct (starting from 1).
@@ -78,10 +111,10 @@ pub trait MoDwtExecutor<T> {
     ///
     /// # Notes
     /// This function performs a single reconstruction step. To fully reconstruct
-    /// a multi-level MODWT, use [`Self::imodwt`] or [`Self::multi_imodwt`].
-    fn imodwt_execute(
+    /// a multi-level MODWT, use [`Self::idwt`] or [`Self::multi_idwt`].
+    fn idwt_execute(
         &self,
-        input: &Dwt<T>,
+        input: &DwtRef<'_, T>,
         output: &mut [T],
         scratch: &mut [T],
         level: usize,
@@ -101,9 +134,9 @@ pub trait MoDwtExecutor<T> {
     /// - `Err(OscletError)` if the reconstruction fails.
     ///
     /// # Notes
-    /// This is a convenience method that internally calls [`Self::imodwt_execute`]
+    /// This is a convenience method that internally calls [`Self::idwt_execute`]
     /// in reverse order across all levels.
-    fn imodwt(&self, input: &Dwt<T>, levels: usize) -> Result<Vec<T>, OscletError>;
+    fn idwt(&self, input: &DwtRef<'_, T>, levels: usize) -> Result<Vec<T>, OscletError>;
 
     /// Performs a full inverse reconstruction from a multi-resolution MODWT decomposition.
     ///
@@ -118,24 +151,34 @@ pub trait MoDwtExecutor<T> {
     /// - `Err(OscletError)` if any of the internal levels are inconsistent or invalid.
     ///
     /// # Notes
-    /// Unlike [`Self::imodwt`], this version is designed for multi-level, explicitly
+    /// Unlike [`Self::idwt`], this version is designed for multi-level, explicitly
     /// separated decompositions where each level is stored independently.
-    fn multi_imodwt(&self, input: &MultiDwt<T>) -> Result<Vec<T>, OscletError>;
+    fn multi_idwt(&self, input: &MultiDwt<T>) -> Result<Vec<T>, OscletError>;
 
     /// Returns the length of the wavelet filter used by this executor.
     ///
     /// # Returns
     /// The number of coefficients in the underlying wavelet filter.
     fn filter_length(&self) -> usize;
+
+    /// Converts this MODWT/SWT executor into a standard decimated DWT executor.
+    ///
+    /// This allows reuse of the same wavelet filter and configuration in
+    /// non-redundant (downsampled) transforms.
+    ///
+    /// # Returns
+    /// An [`Arc`] to a [`DwtExecutor`] sharing the same wavelet definition.
+    fn to_dwt(self: Arc<Self>) -> Arc<dyn DwtExecutor<T> + Send + Sync>;
 }
 
 pub(crate) struct MoDwtHandler<T> {
     pub(crate) h: Vec<T>,
     pub(crate) g: Vec<T>,
     pub(crate) convolution: Box<dyn Convolve1d<T> + Send + Sync>,
+    pub(crate) stationary_wavelet_transform: bool,
 }
 
-impl<T: Mul<T, Output = T> + Copy + Sqrt2Provider<T>> MoDwtHandler<T> {
+impl<T: WaveletSample> MoDwtHandler<T> {
     pub(crate) fn new(
         wavelet: Wavelet<T>,
         convolution: Box<dyn Convolve1d<T> + Send + Sync>,
@@ -152,11 +195,31 @@ impl<T: Mul<T, Output = T> + Copy + Sqrt2Provider<T>> MoDwtHandler<T> {
             .map(|&x| x * T::FRAC_SQRT2)
             .collect::<Vec<_>>();
 
-        Self { h, g, convolution }
+        Self {
+            h,
+            g,
+            convolution,
+            stationary_wavelet_transform: false,
+        }
+    }
+
+    pub(crate) fn new_stationary(
+        wavelet: Wavelet<T>,
+        convolution: Box<dyn Convolve1d<T> + Send + Sync>,
+    ) -> Self {
+        let h = wavelet.dec_hi.to_vec();
+        let g = wavelet.dec_lo.to_vec();
+
+        Self {
+            h,
+            g,
+            convolution,
+            stationary_wavelet_transform: true,
+        }
     }
 }
 
-impl<T: Copy + 'static + Debug + Default + Mul<T, Output = T>> MoDwtHandler<T>
+impl<T: WaveletSample> MoDwtHandler<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -176,8 +239,21 @@ where
 
         new_kernel = new_kernel.iter().copied().rev().collect();
 
+        let filter_offset = if self.stationary_wavelet_transform {
+            0
+        } else {
+            // shifter filter is required for MODWT
+            -(new_kernel.len() as isize / 2)
+        };
+
+        let scratch_size =
+            self.convolution
+                .scratch_size(input.len(), new_kernel.len(), filter_offset);
+
+        let mut scratch = try_vec![T::default(); scratch_size];
+
         self.convolution
-            .convolve(input, output, &new_kernel, -(new_kernel.len() as isize / 2))?;
+            .convolve(input, output, &mut scratch, &new_kernel, filter_offset)?;
 
         Ok(())
     }
@@ -213,59 +289,123 @@ where
         }
 
         // filters here is supposed to be reversed ones
+        let filter_center_offset_h = if self.stationary_wavelet_transform {
+            -1
+        } else {
+            // filter shifter is required for MODWT
+            (new_h_kernel.len() as isize - 1) / 2
+        };
+        let filter_center_offset_g = if self.stationary_wavelet_transform {
+            -1
+        } else {
+            // filter shifter is required for MODWT
+            (new_g_kernel.len() as isize - 1) / 2
+        };
 
-        let filter_center_offset_h = (new_h_kernel.len() as isize - 1) / 2;
-        let filter_center_offset_g = (new_g_kernel.len() as isize - 1) / 2;
+        let h_convolution_scratch_size = self.convolution.scratch_size(
+            input_h.len(),
+            new_h_kernel.len(),
+            filter_center_offset_h,
+        );
+        let v_convolution_scratch_size = self.convolution.scratch_size(
+            input_h.len(),
+            new_g_kernel.len(),
+            filter_center_offset_g,
+        );
 
-        self.convolution
-            .convolve(input_h, output, &new_h_kernel, filter_center_offset_h)?;
-        self.convolution
-            .convolve(input_g, scratch, &new_g_kernel, filter_center_offset_g)?;
+        let mut total_scratch =
+            try_vec![T::default(); h_convolution_scratch_size + v_convolution_scratch_size];
 
-        for (dst, src) in output.iter_mut().zip(scratch.iter()) {
-            *dst = *dst + *src;
+        let (h_scratch, v_scratch) = total_scratch.split_at_mut(h_convolution_scratch_size);
+
+        self.convolution.convolve(
+            input_h,
+            output,
+            h_scratch,
+            &new_h_kernel,
+            filter_center_offset_h,
+        )?;
+        self.convolution.convolve(
+            input_g,
+            scratch,
+            v_scratch,
+            &new_g_kernel,
+            filter_center_offset_g,
+        )?;
+
+        if self.stationary_wavelet_transform {
+            for (dst, src) in output.iter_mut().zip(scratch.iter()) {
+                *dst = (*dst + *src) * 0.5f64.as_();
+            }
+        } else {
+            for (dst, src) in output.iter_mut().zip(scratch.iter()) {
+                *dst = *dst + *src;
+            }
         }
 
         Ok(())
     }
 }
 
-impl<
-    T: Copy + 'static + Debug + Default + Mul<T, Output = T> + Neg<Output = T> + Add<T, Output = T>,
-> MoDwtExecutor<T> for MoDwtHandler<T>
+impl<T: WaveletSample> MoDwtExecutor<T> for MoDwtHandler<T>
 where
     f64: AsPrimitive<T>,
 {
-    fn modwt(&self, input: &[T], level: usize) -> Result<Dwt<T>, OscletError> {
-        let mut approx = try_vec![T::default(); input.len()];
-        let mut details = try_vec![T::default(); input.len()];
+    fn dwt_execute(
+        &self,
+        input: &[T],
+        approximation: &mut [T],
+        detail: &mut [T],
+        level: usize,
+    ) -> Result<(), OscletError> {
+        if input.is_empty() {
+            return Err(OscletError::ZeroedBaseSize);
+        }
+
+        if input.len() != approximation.len() {
+            return Err(OscletError::ApproxDetailsNotMatches(
+                input.len(),
+                approximation.len(),
+            ));
+        }
+
+        if approximation.len() != detail.len() {
+            return Err(OscletError::ApproxDetailsNotMatches(
+                input.len(),
+                detail.len(),
+            ));
+        }
 
         if level == 0 {
-            self.circular_convolve(input, &mut approx, &self.h, level + 1)?;
-            self.circular_convolve(input, &mut details, &self.g, level + 1)?;
+            self.circular_convolve(input, approximation, &self.h, level + 1)?;
+            self.circular_convolve(input, detail, &self.g, level + 1)?;
 
-            Ok(Dwt {
-                approximations: approx,
-                details,
-            })
+            Ok(())
         } else {
             let mut input_proxy = input.to_vec();
 
             for j in 0..level {
-                self.circular_convolve(&input_proxy, &mut approx, &self.h, j + 1)?;
-                self.circular_convolve(&input_proxy, &mut details, &self.g, j + 1)?;
+                self.circular_convolve(&input_proxy, approximation, &self.h, j + 1)?;
+                self.circular_convolve(&input_proxy, detail, &self.g, j + 1)?;
 
-                input_proxy = details.to_vec();
+                input_proxy = detail.to_vec();
             }
 
-            Ok(Dwt {
-                approximations: approx,
-                details,
-            })
+            Ok(())
         }
     }
 
-    fn multi_modwt(&self, input: &[T], level: usize) -> Result<MultiDwt<T>, OscletError> {
+    fn dwt(&self, input: &[T], level: usize) -> Result<Dwt<T>, OscletError> {
+        let mut approx = try_vec![T::default(); input.len()];
+        let mut details = try_vec![T::default(); input.len()];
+        self.dwt_execute(input, &mut approx, &mut details, level)?;
+        Ok(Dwt {
+            approximations: approx,
+            details,
+        })
+    }
+
+    fn multi_dwt(&self, input: &[T], level: usize) -> Result<MultiDwt<T>, OscletError> {
         let mut approx = try_vec![T::default(); input.len()];
         let mut details = try_vec![T::default(); input.len()];
 
@@ -300,13 +440,17 @@ where
         }
     }
 
-    fn imodwt_execute(
+    fn idwt_execute(
         &self,
-        input: &Dwt<T>,
+        input: &DwtRef<'_, T>,
         output: &mut [T],
         scratch: &mut [T],
         level: usize,
     ) -> Result<(), OscletError> {
+        if input.details.is_empty() || input.approximations.is_empty() {
+            return Err(OscletError::ZeroedBaseSize);
+        }
+
         if input.details.len() != input.approximations.len() {
             return Err(OscletError::ApproxDetailsNotMatches(
                 input.approximations.len(),
@@ -314,9 +458,20 @@ where
             ));
         }
 
+        if input.details.len() != output.len() {
+            return Err(OscletError::OutputSizeIsNotValid(
+                input.details.len(),
+                output.len(),
+            ));
+        }
+
+        if scratch.len() < output.len() {
+            return Err(OscletError::ScratchSize(output.len(), scratch.len()));
+        }
+
         self.circular_convolve_synthesize(
-            &input.approximations,
-            &input.details,
+            input.approximations,
+            input.details,
             output,
             scratch,
             &self.h,
@@ -327,7 +482,7 @@ where
         Ok(())
     }
 
-    fn imodwt(&self, input: &Dwt<T>, levels: usize) -> Result<Vec<T>, OscletError> {
+    fn idwt(&self, input: &DwtRef<'_, T>, levels: usize) -> Result<Vec<T>, OscletError> {
         if input.details.len() != input.approximations.len() {
             return Err(OscletError::ApproxDetailsNotMatches(
                 input.approximations.len(),
@@ -337,12 +492,12 @@ where
         let mut output = try_vec![T::default(); input.details.len()];
         let mut scratch = try_vec![T::default(); output.len()];
         for j in (0..levels.max(1)).rev() {
-            self.imodwt_execute(input, &mut output, &mut scratch, j + 1)?;
+            self.idwt_execute(input, &mut output, &mut scratch, j + 1)?;
         }
         Ok(output)
     }
 
-    fn multi_imodwt(&self, input: &MultiDwt<T>) -> Result<Vec<T>, OscletError> {
+    fn multi_idwt(&self, input: &MultiDwt<T>) -> Result<Vec<T>, OscletError> {
         if input.levels.is_empty() {
             return Ok(vec![]);
         }
@@ -356,13 +511,96 @@ where
             if h.len() != g.len() || h.len() != base_len {
                 return Err(OscletError::ApproxDetailsNotMatches(h.len(), g.len()));
             }
-            self.imodwt_execute(level, &mut output, &mut scratch, j + 1)?;
+            self.idwt_execute(
+                &DwtRef {
+                    approximations: h,
+                    details: g,
+                },
+                &mut output,
+                &mut scratch,
+                j + 1,
+            )?;
         }
         Ok(output)
     }
 
     fn filter_length(&self) -> usize {
         self.h.len()
+    }
+
+    fn to_dwt(self: Arc<Self>) -> Arc<dyn DwtExecutor<T> + Send + Sync> {
+        Arc::new(CompletedDwtExecutor::new(self.clone()))
+    }
+}
+
+impl<T: WaveletSample> DwtForwardExecutor<T> for MoDwtHandler<T>
+where
+    f64: AsPrimitive<T>,
+{
+    fn execute_forward(
+        &self,
+        input: &[T],
+        approx: &mut [T],
+        details: &mut [T],
+    ) -> Result<(), OscletError> {
+        self.dwt_execute(input, approx, details, 1)
+    }
+
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[T],
+        approx: &mut [T],
+        details: &mut [T],
+        _: &mut [T],
+    ) -> Result<(), OscletError> {
+        self.dwt_execute(input, approx, details, 1)
+    }
+
+    fn required_scratch_size(&self, _: usize) -> usize {
+        0
+    }
+
+    fn dwt_size(&self, input_length: usize) -> DwtSize {
+        DwtSize {
+            approx_length: input_length,
+            details_length: input_length,
+        }
+    }
+}
+
+impl<T: WaveletSample> DwtInverseExecutor<T> for MoDwtHandler<T>
+where
+    f64: AsPrimitive<T>,
+{
+    fn execute_inverse(
+        &self,
+        approx: &[T],
+        details: &[T],
+        output: &mut [T],
+    ) -> Result<(), OscletError> {
+        let mut scratch = try_vec![T::default(); output.len()];
+        self.idwt_execute(
+            &DwtRef {
+                approximations: approx,
+                details,
+            },
+            output,
+            &mut scratch,
+            1,
+        )
+    }
+
+    fn idwt_size(&self, input_length: DwtSize) -> usize {
+        input_length.details_length.max(input_length.approx_length)
+    }
+}
+
+impl<T: WaveletSample> IncompleteDwtExecutor<T> for MoDwtHandler<T>
+where
+    f64: AsPrimitive<T>,
+{
+    fn filter_length(&self) -> usize {
+        self.g.len()
     }
 }
 
@@ -433,14 +671,13 @@ mod tests {
             fill_wavelet(&DaubechiesFamily::Db2.get_wavelet()).unwrap(),
             f64::make_convolution_1d(BorderMode::Wrap),
         );
-        let result = handler.modwt(&input, 0).unwrap();
-        println!("approx {:?}", result.approximations);
-        println!("details {:?}", result.details);
+        let result = handler.dwt(&input, 0).unwrap();
+
         result.approximations.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (R[i] - x).abs() < 1e-7,
                 "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
-                R [i],
+                R[i],
                 x
             );
         });
@@ -452,6 +689,225 @@ mod tests {
                 x
             );
         });
+    }
+
+    #[test]
+    fn test_swt() {
+        const R: [f64; 16] = [
+            -0.16823237931663843,
+            2.220446049250313e-16,
+            1.4488887394336025,
+            -0.09473434549075282,
+            -0.12940952255126026,
+            -0.9659258262890682,
+            -0.45200421036033434,
+            -1.3557636745107464,
+            3.6108901768967767,
+            -2.850841511550392,
+            1.4631900156863689,
+            2.3150034219579703,
+            -1.7333407324761183,
+            -1.0170094733107524,
+            0.4147906341628533,
+            -0.48550131228150795,
+        ];
+
+        const G: [f64; 16] = [
+            1.524427259255948,
+            2.310789034541149,
+            4.113231164568025,
+            5.1138321679176,
+            3.829028128095766,
+            1.6730326074756159,
+            0.3965239270635227,
+            0.5332996904554477,
+            3.6369543302653353,
+            6.3061913048154,
+            5.9084893026125425,
+            7.600717735756567,
+            7.510628983111198,
+            2.9571564852986305,
+            0.8700134056589814,
+            1.29427747437091,
+        ];
+
+        let input = vec![
+            1.0, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3,
+        ];
+
+        let handler = MoDwtHandler::new_stationary(
+            fill_wavelet(&DaubechiesFamily::Db2.get_wavelet()).unwrap(),
+            f64::make_convolution_1d(BorderMode::Wrap),
+        );
+        let result = handler.dwt(&input, 1).unwrap();
+
+        result.approximations.iter().enumerate().for_each(|(i, x)| {
+            assert!(
+                (R[i] - x).abs() < 1e-7,
+                "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
+                R[i],
+                x
+            );
+        });
+        result.details.iter().enumerate().for_each(|(i, x)| {
+            assert!(
+                (G[i] - x).abs() < 1e-7,
+                "details difference expected to be < 1e-7, but values were ref {}, derived {}",
+                G[i],
+                x
+            );
+        });
+
+        let inverse = handler.idwt(&result.to_ref(), 0);
+        println!("{:?}", inverse);
+    }
+
+    #[test]
+    fn test_swt_round_trip() {
+        let input = vec![
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            2.0,
+            1.0,
+            0.0,
+            1.0,
+            2.4,
+            6.5,
+            2.4,
+            6.4,
+            5.2,
+            0.6,
+            0.5,
+            1.3,
+            1.524427259255948,
+            2.310789034541149,
+            4.113231164568025,
+            5.1138321679176,
+            3.829028128095766,
+            1.6730326074756159,
+            0.3965239270635227,
+            0.5332996904554477,
+            3.6369543302653353,
+            6.3061913048154,
+            5.9084893026125425,
+            7.600717735756567,
+            7.510628983111198,
+            2.9571564852986305,
+            0.8700134056589814,
+            1.29427747437091,
+            -0.16823237931663843,
+            2.220446049250313e-16,
+            1.4488887394336025,
+            -0.09473434549075282,
+            -0.12940952255126026,
+            -0.9659258262890682,
+            -0.45200421036033434,
+            -1.3557636745107464,
+            3.6108901768967767,
+            -2.850841511550392,
+            1.4631900156863689,
+            2.3150034219579703,
+            -1.7333407324761183,
+            -1.0170094733107524,
+            0.4147906341628533,
+            -0.48550131228150795,
+        ];
+
+        let modes = [BorderMode::Wrap];
+
+        for mode in modes.iter() {
+            let handler = MoDwtHandler::new_stationary(
+                fill_wavelet(&DaubechiesFamily::Db3.get_wavelet()).unwrap(),
+                f64::make_convolution_1d(*mode),
+            );
+            let result = handler.dwt(&input, 1).unwrap();
+            let inverse = handler.idwt(&result.to_ref(), 1).unwrap();
+
+            input.iter().enumerate().for_each(|(i, x)| {
+                assert!(
+                    (inverse[i] - x).abs() < 1e-7,
+                    "approximations difference expected to be < 1e-7, but values were ref {}, derived {} for mode {mode}",
+                    inverse[i],
+                    x
+                );
+            });
+        }
+    }
+
+    #[test]
+    fn test_modwt_round_trip_boundary() {
+        let input = vec![
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            2.0,
+            1.0,
+            0.0,
+            1.0,
+            2.4,
+            6.5,
+            2.4,
+            6.4,
+            5.2,
+            0.6,
+            0.5,
+            1.3,
+            1.524427259255948,
+            2.310789034541149,
+            4.113231164568025,
+            5.1138321679176,
+            3.829028128095766,
+            1.6730326074756159,
+            0.3965239270635227,
+            0.5332996904554477,
+            3.6369543302653353,
+            6.3061913048154,
+            5.9084893026125425,
+            7.600717735756567,
+            7.510628983111198,
+            2.9571564852986305,
+            0.8700134056589814,
+            1.29427747437091,
+            -0.16823237931663843,
+            2.220446049250313e-16,
+            1.4488887394336025,
+            -0.09473434549075282,
+            -0.12940952255126026,
+            -0.9659258262890682,
+            -0.45200421036033434,
+            -1.3557636745107464,
+            3.6108901768967767,
+            -2.850841511550392,
+            1.4631900156863689,
+            2.3150034219579703,
+            -1.7333407324761183,
+            -1.0170094733107524,
+            0.4147906341628533,
+            -0.48550131228150795,
+        ];
+
+        let modes = [BorderMode::Wrap];
+
+        for mode in modes.iter() {
+            let handler = MoDwtHandler::new(
+                fill_wavelet(&DaubechiesFamily::Db13.get_wavelet()).unwrap(),
+                f64::make_convolution_1d(*mode),
+            );
+            let result = handler.dwt(&input, 1).unwrap();
+            let inverse = handler.idwt(&result.to_ref(), 1).unwrap();
+
+            input.iter().enumerate().for_each(|(i, x)| {
+                assert!(
+                    (inverse[i] - x).abs() < 1e-7,
+                    "approximations difference expected to be < 1e-7, but values were ref {}, derived {} for mode {mode}",
+                    inverse[i],
+                    x
+                );
+            });
+        }
     }
 
     #[test]
@@ -502,12 +958,12 @@ mod tests {
             fill_wavelet(&DaubechiesFamily::Db3.get_wavelet()).unwrap(),
             f64::make_convolution_1d(BorderMode::Wrap),
         );
-        let result = handler.modwt(&input, 0).unwrap();
+        let result = handler.dwt(&input, 0).unwrap();
         result.approximations.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (R[i] - x).abs() < 1e-7,
                 "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
-                R [i],
+                R[i],
                 x
             );
         });
@@ -569,12 +1025,12 @@ mod tests {
             fill_wavelet(&DaubechiesFamily::Db4.get_wavelet()).unwrap(),
             f64::make_convolution_1d(BorderMode::Wrap),
         );
-        let result = handler.modwt(&input, 0).unwrap();
+        let result = handler.dwt(&input, 0).unwrap();
         result.approximations.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (R[i] - x).abs() < 1e-7,
                 "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
-                R [i],
+                R[i],
                 x
             );
         });
@@ -636,12 +1092,12 @@ mod tests {
             fill_wavelet(&DaubechiesFamily::Db3.get_wavelet()).unwrap(),
             f64::make_convolution_1d(BorderMode::Wrap),
         );
-        let result = handler.modwt(&input, 3).unwrap();
+        let result = handler.dwt(&input, 3).unwrap();
         result.approximations.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (R[i] - x).abs() < 1e-7,
                 "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
-                R [i],
+                R[i],
                 x
             );
         });
@@ -705,12 +1161,12 @@ mod tests {
             fill_wavelet(&DaubechiesFamily::Db3.get_wavelet()).unwrap(),
             f64::make_convolution_1d(BorderMode::Wrap),
         );
-        let result = handler.modwt(&input, 0).unwrap();
+        let result = handler.dwt(&input, 0).unwrap();
         result.approximations.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (R[i] - x).abs() < 1e-7,
                 "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
-               R [i],
+                R[i],
                 x
             );
         });
@@ -774,12 +1230,12 @@ mod tests {
             fill_wavelet(&DaubechiesFamily::Db1.get_wavelet()).unwrap(),
             f64::make_convolution_1d(BorderMode::Wrap),
         );
-        let result = handler.modwt(&input, 0).unwrap();
+        let result = handler.dwt(&input, 0).unwrap();
         result.approximations.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (R[i] - x).abs() < 1e-7,
                 "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
-                R [i],
+                R[i],
                 x
             );
         });
@@ -841,12 +1297,12 @@ mod tests {
             fill_wavelet(&DaubechiesFamily::Db2.get_wavelet()).unwrap(),
             f64::make_convolution_1d(BorderMode::Wrap),
         );
-        let result = handler.modwt(&input, 1).unwrap();
+        let result = handler.dwt(&input, 1).unwrap();
         result.approximations.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (R[i] - x).abs() < 1e-7,
                 "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
-                R [i],
+                R[i],
                 x
             );
         });
@@ -859,7 +1315,7 @@ mod tests {
             );
         });
 
-        let inverse = handler.imodwt(&result, 1).unwrap();
+        let inverse = handler.idwt(&result.to_ref(), 1).unwrap();
         inverse.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (input[i] - x).abs() < 1e-7,
@@ -880,8 +1336,8 @@ mod tests {
             fill_wavelet(&DaubechiesFamily::Db2.get_wavelet()).unwrap(),
             f64::make_convolution_1d(BorderMode::Wrap),
         );
-        let result = handler.multi_modwt(&input, 3).unwrap();
-        let inverse = handler.multi_imodwt(&result).unwrap();
+        let result = handler.multi_dwt(&input, 3).unwrap();
+        let inverse = handler.multi_idwt(&result).unwrap();
 
         inverse.iter().enumerate().for_each(|(i, x)| {
             assert!(
@@ -903,8 +1359,8 @@ mod tests {
             fill_wavelet(&DaubechiesFamily::Db2.get_wavelet()).unwrap(),
             f32::make_convolution_1d(BorderMode::Wrap),
         );
-        let result = handler.multi_modwt(&input, 3).unwrap();
-        let inverse = handler.multi_imodwt(&result).unwrap();
+        let result = handler.multi_dwt(&input, 3).unwrap();
+        let inverse = handler.multi_idwt(&result).unwrap();
 
         inverse.iter().enumerate().for_each(|(i, x)| {
             assert!(
@@ -929,8 +1385,8 @@ mod tests {
             fill_wavelet(&DaubechiesFamily::Db3.get_wavelet()).unwrap(),
             f32::make_convolution_1d(BorderMode::Wrap),
         );
-        let result = handler.multi_modwt(&input, 3).unwrap();
-        let inverse = handler.multi_imodwt(&result).unwrap();
+        let result = handler.multi_dwt(&input, 3).unwrap();
+        let inverse = handler.multi_idwt(&result).unwrap();
 
         inverse.iter().enumerate().for_each(|(i, x)| {
             assert!(
@@ -955,8 +1411,8 @@ mod tests {
             fill_wavelet(&DaubechiesFamily::Db4.get_wavelet()).unwrap(),
             f32::make_convolution_1d(BorderMode::Wrap),
         );
-        let result = handler.multi_modwt(&input, 3).unwrap();
-        let inverse = handler.multi_imodwt(&result).unwrap();
+        let result = handler.multi_dwt(&input, 3).unwrap();
+        let inverse = handler.multi_idwt(&result).unwrap();
 
         inverse.iter().enumerate().for_each(|(i, x)| {
             assert!(
@@ -981,8 +1437,8 @@ mod tests {
             fill_wavelet(&DaubechiesFamily::Db8.get_wavelet()).unwrap(),
             f32::make_convolution_1d(BorderMode::Wrap),
         );
-        let result = handler.multi_modwt(&input, 3).unwrap();
-        let inverse = handler.multi_imodwt(&result).unwrap();
+        let result = handler.multi_dwt(&input, 3).unwrap();
+        let inverse = handler.multi_idwt(&result).unwrap();
 
         inverse.iter().enumerate().for_each(|(i, x)| {
             assert!(

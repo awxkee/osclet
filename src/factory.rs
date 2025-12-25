@@ -35,6 +35,12 @@ pub(crate) fn has_valid_avx() -> bool {
     std::arch::is_x86_feature_detected!("avx2") && std::arch::is_x86_feature_detected!("fma")
 }
 
+#[inline]
+#[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+pub(crate) fn has_valid_sse() -> bool {
+    std::arch::is_x86_feature_detected!("sse4.2")
+}
+
 pub(crate) trait DwtFactory<T> {
     fn wavelet_2_taps(
         border_mode: BorderMode,
@@ -60,6 +66,10 @@ pub(crate) trait DwtFactory<T> {
         border_mode: BorderMode,
         dwt: &[T; 12],
     ) -> Arc<dyn IncompleteDwtExecutor<T> + Send + Sync>;
+    fn wavelet_16_taps(
+        border_mode: BorderMode,
+        dwt: &[T; 16],
+    ) -> Arc<dyn IncompleteDwtExecutor<T> + Send + Sync>;
     fn wavelet_n_taps(
         border_mode: BorderMode,
         dwt: &[T],
@@ -81,6 +91,13 @@ impl DwtFactory<f32> for f32 {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet2TapsF32;
                 return Arc::new(AvxWavelet2TapsF32::new(border_mode, dwt));
+            }
+        }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            if has_valid_sse() {
+                use crate::sse::SseWavelet2TapsF32;
+                return Arc::new(SseWavelet2TapsF32::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
@@ -106,6 +123,13 @@ impl DwtFactory<f32> for f32 {
                 return Arc::new(AvxWavelet4TapsF32::new(border_mode, dwt));
             }
         }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            if has_valid_sse() {
+                use crate::sse::SseWavelet4TapsF32;
+                return Arc::new(SseWavelet4TapsF32::new(border_mode, dwt));
+            }
+        }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet4taps::Wavelet4Taps;
@@ -127,6 +151,13 @@ impl DwtFactory<f32> for f32 {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet6TapsF32;
                 return Arc::new(AvxWavelet6TapsF32::new(border_mode, dwt));
+            }
+        }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            if has_valid_sse() {
+                use crate::sse::SseWavelet6TapsF32;
+                return Arc::new(SseWavelet6TapsF32::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
@@ -152,6 +183,13 @@ impl DwtFactory<f32> for f32 {
                 return Arc::new(AvxWavelet8TapsF32::new(border_mode, dwt));
             }
         }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            if has_valid_sse() {
+                use crate::sse::SseWavelet8TapsF32;
+                return Arc::new(SseWavelet8TapsF32::new(border_mode, dwt));
+            }
+        }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet8taps::Wavelet8Taps;
@@ -173,6 +211,13 @@ impl DwtFactory<f32> for f32 {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet10TapsF32;
                 return Arc::new(AvxWavelet10TapsF32::new(border_mode, dwt));
+            }
+        }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            if has_valid_sse() {
+                use crate::sse::SseWavelet10TapsF32;
+                return Arc::new(SseWavelet10TapsF32::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
@@ -198,10 +243,47 @@ impl DwtFactory<f32> for f32 {
                 return Arc::new(AvxWavelet12TapsF32::new(border_mode, dwt));
             }
         }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            if has_valid_sse() {
+                use crate::sse::SseWavelet12TapsF32;
+                return Arc::new(SseWavelet12TapsF32::new(border_mode, dwt));
+            }
+        }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet12taps::Wavelet12Taps;
             Arc::new(Wavelet12Taps::new(border_mode, dwt))
+        }
+    }
+
+    fn wavelet_16_taps(
+        border_mode: BorderMode,
+        dwt: &[f32; 16],
+    ) -> Arc<dyn IncompleteDwtExecutor<f32> + Send + Sync> {
+        #[cfg(all(target_arch = "aarch64", feature = "neon"))]
+        {
+            use crate::neon::NeonWavelet16TapsF32;
+            Arc::new(NeonWavelet16TapsF32::new(border_mode, dwt))
+        }
+        #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+        {
+            if has_valid_avx() {
+                use crate::avx::AvxWavelet16TapsF32;
+                return Arc::new(AvxWavelet16TapsF32::new(border_mode, dwt));
+            }
+        }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            if has_valid_sse() {
+                use crate::sse::SseWaveletNTapsF32;
+                return Arc::new(SseWaveletNTapsF32::new(border_mode, dwt));
+            }
+        }
+        #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
+        {
+            use crate::wavelet16taps::Wavelet16Taps;
+            Arc::new(Wavelet16Taps::new(border_mode, dwt))
         }
     }
 
@@ -219,6 +301,13 @@ impl DwtFactory<f32> for f32 {
             if has_valid_avx() {
                 use crate::avx::AvxWaveletNTapsF32;
                 return Arc::new(AvxWaveletNTapsF32::new(border_mode, dwt));
+            }
+        }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            if has_valid_sse() {
+                use crate::sse::SseWaveletNTapsF32;
+                return Arc::new(SseWaveletNTapsF32::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
@@ -246,6 +335,13 @@ impl DwtFactory<f64> for f64 {
                 return Arc::new(AvxWavelet2TapsF64::new(border_mode, dwt));
             }
         }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            if has_valid_sse() {
+                use crate::sse::SseWavelet2TapsF64;
+                return Arc::new(SseWavelet2TapsF64::new(border_mode, dwt));
+            }
+        }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet2taps::Wavelet2Taps;
@@ -267,6 +363,13 @@ impl DwtFactory<f64> for f64 {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet4TapsF64;
                 return Arc::new(AvxWavelet4TapsF64::new(border_mode, dwt));
+            }
+        }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            if has_valid_sse() {
+                use crate::sse::SseWavelet4TapsF64;
+                return Arc::new(SseWavelet4TapsF64::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
@@ -292,6 +395,13 @@ impl DwtFactory<f64> for f64 {
                 return Arc::new(AvxWavelet6TapsF64::new(border_mode, dwt));
             }
         }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            if has_valid_sse() {
+                use crate::sse::SseWavelet6TapsF64;
+                return Arc::new(SseWavelet6TapsF64::new(border_mode, dwt));
+            }
+        }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet6taps::Wavelet6Taps;
@@ -313,6 +423,13 @@ impl DwtFactory<f64> for f64 {
             if has_valid_avx() {
                 use crate::avx::AvxWavelet8TapsF64;
                 return Arc::new(AvxWavelet8TapsF64::new(border_mode, dwt));
+            }
+        }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            if has_valid_sse() {
+                use crate::sse::SseWavelet8TapsF64;
+                return Arc::new(SseWavelet8TapsF64::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
@@ -338,6 +455,13 @@ impl DwtFactory<f64> for f64 {
                 return Arc::new(AvxWavelet10TapsF64::new(border_mode, dwt));
             }
         }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            if has_valid_sse() {
+                use crate::sse::SseWavelet10TapsF64;
+                return Arc::new(SseWavelet10TapsF64::new(border_mode, dwt));
+            }
+        }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet10taps::Wavelet10Taps;
@@ -361,10 +485,47 @@ impl DwtFactory<f64> for f64 {
                 return Arc::new(AvxWavelet12TapsF64::new(border_mode, dwt));
             }
         }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            if has_valid_sse() {
+                use crate::sse::SseWavelet12TapsF64;
+                return Arc::new(SseWavelet12TapsF64::new(border_mode, dwt));
+            }
+        }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             use crate::wavelet12taps::Wavelet12Taps;
             Arc::new(Wavelet12Taps::new(border_mode, dwt))
+        }
+    }
+
+    fn wavelet_16_taps(
+        border_mode: BorderMode,
+        dwt: &[f64; 16],
+    ) -> Arc<dyn IncompleteDwtExecutor<f64> + Send + Sync> {
+        #[cfg(all(target_arch = "aarch64", feature = "neon"))]
+        {
+            use crate::neon::NeonWavelet16TapsF64;
+            Arc::new(NeonWavelet16TapsF64::new(border_mode, dwt))
+        }
+        #[cfg(all(target_arch = "x86_64", feature = "avx"))]
+        {
+            if has_valid_avx() {
+                use crate::avx::AvxWavelet16TapsF64;
+                return Arc::new(AvxWavelet16TapsF64::new(border_mode, dwt));
+            }
+        }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            if has_valid_sse() {
+                use crate::sse::SseWaveletNTapsF64;
+                return Arc::new(SseWaveletNTapsF64::new(border_mode, dwt));
+            }
+        }
+        #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
+        {
+            use crate::wavelet16taps::Wavelet16Taps;
+            Arc::new(Wavelet16Taps::new(border_mode, dwt))
         }
     }
 
@@ -382,6 +543,13 @@ impl DwtFactory<f64> for f64 {
             if has_valid_avx() {
                 use crate::avx::AvxWaveletNTapsF64;
                 return Arc::new(AvxWaveletNTapsF64::new(border_mode, dwt));
+            }
+        }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            if has_valid_sse() {
+                use crate::sse::SseWaveletNTapsF64;
+                return Arc::new(SseWaveletNTapsF64::new(border_mode, dwt));
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]

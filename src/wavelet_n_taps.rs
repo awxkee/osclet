@@ -27,15 +27,15 @@
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use crate::border_mode::BorderMode;
-use crate::err::OscletError;
-use crate::filter_padding::{MakeArenaFactoryProvider, make_arena_1d};
+use crate::err::{OscletError, try_vec};
+use crate::filter_padding::write_arena_1d;
 use crate::mla::fmla;
 use crate::util::{dwt_length, idwt_length, low_pass_to_high};
-use crate::{DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor};
-use num_traits::{AsPrimitive, MulAdd};
-use std::fmt::Debug;
+use crate::{
+    DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor, WaveletSample,
+};
+use num_traits::AsPrimitive;
 use std::marker::PhantomData;
-use std::ops::{Add, Mul};
 
 pub(crate) struct WaveletNTaps<T> {
     phantom_data: PhantomData<T>,
@@ -45,7 +45,7 @@ pub(crate) struct WaveletNTaps<T> {
     filter_length: usize,
 }
 
-impl<T: Copy + 'static + Debug + Default + Mul<T, Output = T>> WaveletNTaps<T>
+impl<T: WaveletSample> WaveletNTaps<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -61,15 +61,7 @@ where
     }
 }
 
-impl<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + MakeArenaFactoryProvider<T>,
-> DwtForwardExecutor<T> for WaveletNTaps<T>
+impl<T: WaveletSample> DwtForwardExecutor<T> for WaveletNTaps<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -78,6 +70,17 @@ where
         input: &[T],
         approx: &mut [T],
         details: &mut [T],
+    ) -> Result<(), OscletError> {
+        let mut scratch = try_vec![T::default(); self.required_scratch_size(input.len())];
+        self.execute_forward_with_scratch(input, approx, details, &mut scratch)
+    }
+
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[T],
+        approx: &mut [T],
+        details: &mut [T],
+        scratch: &mut [T],
     ) -> Result<(), OscletError> {
         let half = dwt_length(input.len(), self.filter_length);
 
@@ -92,11 +95,18 @@ where
             return Err(OscletError::ApproxDetailsSize(details.len()));
         }
 
+        let required_size = self.required_scratch_size(input.len());
+        if scratch.len() < required_size {
+            return Err(OscletError::ScratchSize(required_size, scratch.len()));
+        }
+
+        let (padded_input, _) = scratch.split_at_mut(required_size);
+
         let whole_pad_size = (2 * half + self.filter_length - 2) - input.len();
         let left_pad = whole_pad_size / 2;
         let right_pad = whole_pad_size - left_pad;
 
-        let padded_input = make_arena_1d(input, left_pad, right_pad, self.border_mode)?;
+        write_arena_1d(input, padded_input, left_pad, right_pad, self.border_mode)?;
 
         unsafe {
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
@@ -121,10 +131,21 @@ where
         }
         Ok(())
     }
+
+    fn required_scratch_size(&self, input_length: usize) -> usize {
+        let half = dwt_length(input_length, self.filter_length);
+        let whole_pad_size = (2 * half + self.filter_length - 2) - input_length;
+        let left_pad = whole_pad_size / 2;
+        let right_pad = whole_pad_size - left_pad;
+        left_pad + right_pad + input_length
+    }
+
+    fn dwt_size(&self, input_length: usize) -> DwtSize {
+        DwtSize::new(dwt_length(input_length, self.filter_length()))
+    }
 }
 
-impl<T: Copy + 'static + MulAdd<T, Output = T> + Add<T, Output = T> + Mul<T, Output = T> + Default>
-    DwtInverseExecutor<T> for WaveletNTaps<T>
+impl<T: WaveletSample> DwtInverseExecutor<T> for WaveletNTaps<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -144,7 +165,7 @@ where
         let rec_len = idwt_length(approx.len(), self.filter_length);
 
         if output.len() != rec_len {
-            return Err(OscletError::OutputSizeIsTooSmall(output.len(), rec_len));
+            return Err(OscletError::OutputSizeIsNotValid(output.len(), rec_len));
         }
 
         let whole_pad_size = (2 * approx.len() + self.filter_length - 2) - output.len();
@@ -204,19 +225,13 @@ where
         }
         Ok(())
     }
+
+    fn idwt_size(&self, input_length: DwtSize) -> usize {
+        idwt_length(input_length.approx_length, self.filter_length())
+    }
 }
 
-impl<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + Send
-        + Sync
-        + MakeArenaFactoryProvider<T>,
-> IncompleteDwtExecutor<T> for WaveletNTaps<T>
+impl<T: WaveletSample> IncompleteDwtExecutor<T> for WaveletNTaps<T>
 where
     f64: AsPrimitive<T>,
 {

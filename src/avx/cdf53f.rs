@@ -30,7 +30,8 @@ use crate::avx::util::afmla;
 use crate::cdf53f::define_dwt_cdf_float;
 use crate::err::{OscletError, try_vec};
 use crate::{
-    Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor, MultiDwt,
+    Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor,
+    MultiDwt, WaveletSample,
 };
 use num_traits::{AsPrimitive, MulAdd};
 use std::marker::PhantomData;
@@ -62,6 +63,27 @@ where
         details: &mut [T],
     ) -> Result<(), OscletError> {
         unsafe { self.execute_forward_impl(input, approx, details) }
+    }
+
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[T],
+        approx: &mut [T],
+        details: &mut [T],
+        _: &mut [T],
+    ) -> Result<(), OscletError> {
+        unsafe { self.execute_forward_impl(input, approx, details) }
+    }
+
+    fn required_scratch_size(&self, _: usize) -> usize {
+        0
+    }
+
+    fn dwt_size(&self, input_length: usize) -> DwtSize {
+        DwtSize {
+            approx_length: input_length.div_ceil(2).max(2),
+            details_length: (input_length / 2).max(1),
+        }
     }
 }
 
@@ -153,15 +175,7 @@ where
     }
 }
 
-impl<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + Sub<T, Output = T>,
-> DwtInverseExecutor<T> for AvxCdf53<T>
+impl<T: WaveletSample> DwtInverseExecutor<T> for AvxCdf53<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -174,17 +188,13 @@ where
     ) -> Result<(), OscletError> {
         unsafe { self.execute_inverse_impl(approx, details, output) }
     }
+
+    fn idwt_size(&self, input_length: DwtSize) -> usize {
+        (input_length.approx_length + input_length.details_length).max(3)
+    }
 }
 
-impl<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + Sub<T, Output = T>,
-> AvxCdf53<T>
+impl<T: WaveletSample> AvxCdf53<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -198,7 +208,7 @@ where
     ) -> Result<(), OscletError> {
         let n = approx.len() + details.len();
         if n != output.len() {
-            return Err(OscletError::OutputSizeIsTooSmall(output.len(), n));
+            return Err(OscletError::OutputSizeIsNotValid(output.len(), n));
         }
         if n < 3 {
             return Err(OscletError::MinFilterSize(n, 3));
@@ -279,17 +289,7 @@ where
     }
 }
 
-impl<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + Sub<T, Output = T>
-        + Send
-        + Sync,
-> IncompleteDwtExecutor<T> for AvxCdf53<T>
+impl<T: WaveletSample> IncompleteDwtExecutor<T> for AvxCdf53<T>
 where
     f64: AsPrimitive<T>,
 {

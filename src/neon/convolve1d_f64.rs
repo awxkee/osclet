@@ -27,9 +27,9 @@
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use crate::BorderMode;
-use crate::convolve1d::Convolve1d;
+use crate::convolve1d::{Convolve1d, ConvolvePaddings};
 use crate::err::OscletError;
-use crate::filter_padding::make_arena_1d;
+use crate::filter_padding::write_arena_1d;
 use crate::mla::fmla;
 use std::arch::aarch64::*;
 use std::ops::Mul;
@@ -39,8 +39,7 @@ pub(crate) struct NeonConvolution1dF64 {
 }
 
 impl NeonConvolution1dF64 {
-    fn convolve_4taps(&self, arena: &[f64], output: &mut [f64], kernel: &[f64]) {
-        assert_eq!(kernel.len(), 4);
+    fn convolve_4taps(&self, arena: &[f64], output: &mut [f64], kernel: &[f64; 4]) {
         unsafe {
             let c0 = vld1q_f64(kernel.as_ptr().cast());
             let c1 = vld1q_f64(kernel.get_unchecked(2..).as_ptr().cast());
@@ -143,8 +142,7 @@ impl NeonConvolution1dF64 {
         }
     }
 
-    fn convolve_6taps(&self, arena: &[f64], output: &mut [f64], kernel: &[f64]) {
-        assert_eq!(kernel.len(), 6);
+    fn convolve_6taps(&self, arena: &[f64], output: &mut [f64], kernel: &[f64; 6]) {
         unsafe {
             let c0 = vld1q_f64(kernel.as_ptr());
             let c2 = vld1q_f64(kernel.get_unchecked(2..).as_ptr());
@@ -256,8 +254,7 @@ impl NeonConvolution1dF64 {
         }
     }
 
-    fn convolve_8taps(&self, arena: &[f64], output: &mut [f64], kernel: &[f64]) {
-        assert_eq!(kernel.len(), 8);
+    fn convolve_8taps(&self, arena: &[f64], output: &mut [f64], kernel: &[f64; 8]) {
         unsafe {
             let c0 = vld1q_f64(kernel.as_ptr());
             let c2 = vld1q_f64(kernel.get_unchecked(2..).as_ptr());
@@ -381,11 +378,16 @@ impl Convolve1d<f64> for NeonConvolution1dF64 {
         &self,
         input: &[f64],
         output: &mut [f64],
+        scratch: &mut [f64],
         kernel: &[f64],
         filter_center: isize,
     ) -> Result<(), OscletError> {
         if input.len() != output.len() {
             return Err(OscletError::InOutSizesMismatch(input.len(), output.len()));
+        }
+
+        if input.is_empty() {
+            return Err(OscletError::ZeroedBaseSize);
         }
 
         let filter_size = kernel.len();
@@ -402,24 +404,35 @@ impl Convolve1d<f64> for NeonConvolution1dF64 {
             ));
         }
 
-        let padding_left = if filter_size.is_multiple_of(2) {
-            ((filter_size / 2) as isize - filter_center - 1).max(0) as usize
-        } else {
-            ((filter_size / 2) as isize - filter_center).max(0) as usize
-        };
+        let required_scratch_size = self.scratch_size(input.len(), filter_size, filter_center);
 
-        let padding_right = filter_size.saturating_sub(padding_left);
+        if scratch.len() < required_scratch_size {
+            return Err(OscletError::ScratchSize(
+                required_scratch_size,
+                scratch.len(),
+            ));
+        }
 
-        let arena = make_arena_1d(input, padding_left, padding_right, self.border_mode)?;
+        let (arena, _) = scratch.split_at_mut(required_scratch_size);
+
+        let paddings = ConvolvePaddings::from_filter(filter_size, filter_center);
+
+        write_arena_1d(
+            input,
+            arena,
+            paddings.padding_left,
+            paddings.padding_right,
+            self.border_mode,
+        )?;
 
         if filter_size == 4 {
-            self.convolve_4taps(&arena, output, kernel);
+            self.convolve_4taps(arena, output, kernel.try_into().unwrap());
             return Ok(());
         } else if filter_size == 6 {
-            self.convolve_6taps(&arena, output, kernel);
+            self.convolve_6taps(arena, output, kernel.try_into().unwrap());
             return Ok(());
         } else if filter_size == 8 {
-            self.convolve_8taps(&arena, output, kernel);
+            self.convolve_8taps(arena, output, kernel.try_into().unwrap());
             return Ok(());
         }
 
@@ -549,5 +562,10 @@ impl Convolve1d<f64> for NeonConvolution1dF64 {
         }
 
         Ok(())
+    }
+
+    fn scratch_size(&self, input_size: usize, filter_size: usize, filter_center: isize) -> usize {
+        let paddings = ConvolvePaddings::from_filter(filter_size, filter_center);
+        input_size + paddings.padding_right + paddings.padding_left
     }
 }

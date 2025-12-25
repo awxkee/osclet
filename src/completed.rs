@@ -27,10 +27,9 @@
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use crate::err::{OscletError, try_vec};
-use crate::util::dwt_length;
 use crate::{
-    Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, IncompleteDwtExecutor, MultiDwt,
-    idwt_length,
+    Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor,
+    MultiDwt,
 };
 use num_traits::{AsPrimitive, MulAdd};
 use std::ops::{Add, Mul};
@@ -55,6 +54,25 @@ impl<T> DwtForwardExecutor<T> for CompletedDwtExecutor<T> {
     ) -> Result<(), OscletError> {
         self.intercepted.execute_forward(input, approx, details)
     }
+
+    fn execute_forward_with_scratch(
+        &self,
+        input: &[T],
+        approx: &mut [T],
+        details: &mut [T],
+        scratch: &mut [T],
+    ) -> Result<(), OscletError> {
+        self.intercepted
+            .execute_forward_with_scratch(input, approx, details, scratch)
+    }
+
+    fn required_scratch_size(&self, input_length: usize) -> usize {
+        self.intercepted.required_scratch_size(input_length)
+    }
+
+    fn dwt_size(&self, input_length: usize) -> DwtSize {
+        self.intercepted.dwt_size(input_length)
+    }
 }
 
 impl<T> DwtInverseExecutor<T> for CompletedDwtExecutor<T> {
@@ -65,6 +83,10 @@ impl<T> DwtInverseExecutor<T> for CompletedDwtExecutor<T> {
         output: &mut [T],
     ) -> Result<(), OscletError> {
         self.intercepted.execute_inverse(approx, details, output)
+    }
+
+    fn idwt_size(&self, input_length: DwtSize) -> usize {
+        self.intercepted.idwt_size(input_length)
     }
 }
 
@@ -81,9 +103,9 @@ where
 {
     fn dwt(&self, signal: &[T], level: usize) -> Result<Dwt<T>, OscletError> {
         if level == 0 || level == 1 {
-            let approx_length = dwt_length(signal.len(), self.intercepted.filter_length());
-            let mut approx = try_vec![T::default(); approx_length];
-            let mut details = try_vec![T::default(); approx_length];
+            let dwt_size = self.intercepted.dwt_size(signal.len());
+            let mut approx = try_vec![T::default(); dwt_size.approx_length];
+            let mut details = try_vec![T::default(); dwt_size.details_length];
 
             self.intercepted
                 .execute_forward(signal, &mut approx, &mut details)?;
@@ -103,10 +125,11 @@ where
                 if filter_length > current_signal.len() {
                     return Err(OscletError::BufferWasTooSmallForLevel);
                 }
-                let approx_length = dwt_length(current_signal.len(), filter_length);
 
-                approx = try_vec![T::default(); approx_length];
-                details = try_vec![T::default(); approx_length];
+                let dwt_size = self.intercepted.dwt_size(signal.len());
+
+                approx = try_vec![T::default(); dwt_size.approx_length];
+                details = try_vec![T::default(); dwt_size.details_length];
 
                 // Forward DWT on current signal
                 self.intercepted
@@ -122,11 +145,12 @@ where
             })
         }
     }
+
     fn multi_dwt(&self, signal: &[T], levels: usize) -> Result<MultiDwt<T>, OscletError> {
         if levels == 0 || levels == 1 {
-            let approx_length = dwt_length(signal.len(), self.intercepted.filter_length());
-            let mut approx = try_vec![T::default(); approx_length];
-            let mut details = try_vec![T::default(); approx_length];
+            let dwt_size = self.intercepted.dwt_size(signal.len());
+            let mut approx = try_vec![T::default(); dwt_size.approx_length];
+            let mut details = try_vec![T::default(); dwt_size.details_length];
 
             self.intercepted
                 .execute_forward(signal, &mut approx, &mut details)?;
@@ -150,10 +174,11 @@ where
                 if filter_length > signal.len() {
                     return Err(OscletError::BufferWasTooSmallForLevel);
                 }
-                let approx_length = dwt_length(signal.len(), filter_length);
 
-                approx = try_vec![T::default(); approx_length];
-                details = try_vec![T::default(); approx_length];
+                let dwt_size = self.intercepted.dwt_size(signal.len());
+
+                approx = try_vec![T::default(); dwt_size.approx_length];
+                details = try_vec![T::default(); dwt_size.details_length];
 
                 // Forward DWT on current signal
                 self.intercepted
@@ -181,7 +206,10 @@ where
                 dwt.details.len(),
             ));
         }
-        let output_length = idwt_length(dwt.details.len(), self.intercepted.filter_length());
+        let output_length = self.intercepted.idwt_size(DwtSize {
+            approx_length: dwt.approximations.len(),
+            details_length: dwt.details.len(),
+        });
         let mut output = try_vec![T::default(); output_length];
 
         self.intercepted

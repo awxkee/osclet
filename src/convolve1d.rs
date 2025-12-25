@@ -26,22 +26,23 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use crate::BorderMode;
 use crate::err::OscletError;
-use crate::filter_padding::{MakeArenaFactoryProvider, make_arena_1d};
+use crate::filter_padding::write_arena_1d;
 use crate::mla::fmla;
-use num_traits::{AsPrimitive, MulAdd};
+use crate::{BorderMode, WaveletSample};
+use num_traits::AsPrimitive;
 use std::marker::PhantomData;
-use std::ops::{Add, Mul};
 
 pub(crate) trait Convolve1d<T> {
     fn convolve(
         &self,
         input: &[T],
         output: &mut [T],
+        scratch: &mut [T],
         kernel: &[T],
         filter_center: isize,
     ) -> Result<(), OscletError>;
+    fn scratch_size(&self, input_size: usize, filter_size: usize, filter_center: isize) -> usize;
 }
 
 pub(crate) trait ConvolveFactory<T> {
@@ -61,6 +62,14 @@ impl ConvolveFactory<f32> for f32 {
             if has_valid_avx() {
                 use crate::avx::AvxConvolution1dF32;
                 return Box::new(AvxConvolution1dF32 { border_mode });
+            }
+        }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            use crate::factory::has_valid_sse;
+            if has_valid_sse() {
+                use crate::sse::SseConvolution1dF32;
+                return Box::new(SseConvolution1dF32 { border_mode });
             }
         }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
@@ -88,6 +97,14 @@ impl ConvolveFactory<f64> for f64 {
                 return Box::new(AvxConvolution1dF64 { border_mode });
             }
         }
+        #[cfg(all(any(target_arch = "x86_64", target_arch = "x86"), feature = "sse"))]
+        {
+            use crate::factory::has_valid_sse;
+            if has_valid_sse() {
+                use crate::sse::SseConvolution1dF64;
+                return Box::new(SseConvolution1dF64 { border_mode });
+            }
+        }
         #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
         {
             Box::new(ScalarConvolution1d {
@@ -98,21 +115,35 @@ impl ConvolveFactory<f64> for f64 {
     }
 }
 
-#[allow(unused)]
-pub(crate) struct ScalarConvolution1d<T> {
-    phantom_data: PhantomData<T>,
-    border_mode: BorderMode,
+#[derive(Debug, Copy, Clone, Hash, Ord, PartialOrd, Eq, PartialEq)]
+pub(crate) struct ConvolvePaddings {
+    pub(crate) padding_left: usize,
+    pub(crate) padding_right: usize,
 }
 
-impl<
-    T: Copy
-        + 'static
-        + MulAdd<T, Output = T>
-        + Add<T, Output = T>
-        + Mul<T, Output = T>
-        + Default
-        + MakeArenaFactoryProvider<T>,
-> Convolve1d<T> for ScalarConvolution1d<T>
+impl ConvolvePaddings {
+    pub(crate) fn from_filter(filter_size: usize, filter_center: isize) -> Self {
+        let padding_left = if filter_size.is_multiple_of(2) {
+            ((filter_size / 2) as isize - filter_center - 1).max(0) as usize
+        } else {
+            ((filter_size / 2) as isize - filter_center).max(0) as usize
+        };
+
+        let padding_right = filter_size.saturating_sub(padding_left);
+        ConvolvePaddings {
+            padding_left,
+            padding_right,
+        }
+    }
+}
+
+#[allow(unused)]
+pub(crate) struct ScalarConvolution1d<T> {
+    pub(crate) phantom_data: PhantomData<T>,
+    pub(crate) border_mode: BorderMode,
+}
+
+impl<T: WaveletSample> Convolve1d<T> for ScalarConvolution1d<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -120,6 +151,7 @@ where
         &self,
         input: &[T],
         output: &mut [T],
+        scratch: &mut [T],
         kernel: &[T],
         filter_center: isize,
     ) -> Result<(), OscletError> {
@@ -129,10 +161,25 @@ where
 
         let filter_size = kernel.len();
 
+        if input.is_empty() {
+            return Err(OscletError::ZeroedBaseSize);
+        }
+
         if kernel.is_empty() {
             output.copy_from_slice(input);
             return Ok(());
         }
+
+        let required_scratch_size = self.scratch_size(input.len(), filter_size, filter_center);
+
+        if scratch.len() < required_scratch_size {
+            return Err(OscletError::ScratchSize(
+                required_scratch_size,
+                scratch.len(),
+            ));
+        }
+
+        let (arena, _) = scratch.split_at_mut(required_scratch_size);
 
         if filter_center.unsigned_abs() >= filter_size {
             return Err(OscletError::MisconfiguredFilterCenter(
@@ -141,15 +188,15 @@ where
             ));
         }
 
-        let padding_left = if filter_size.is_multiple_of(2) {
-            ((filter_size / 2) as isize - filter_center - 1).max(0) as usize
-        } else {
-            ((filter_size / 2) as isize - filter_center).max(0) as usize
-        };
+        let paddings = ConvolvePaddings::from_filter(filter_size, filter_center);
 
-        let padding_right = filter_size.saturating_sub(padding_left);
-
-        let arena = make_arena_1d(input, padding_left, padding_right, self.border_mode)?;
+        write_arena_1d(
+            input,
+            arena,
+            paddings.padding_left,
+            paddings.padding_right,
+            self.border_mode,
+        )?;
 
         let c0 = unsafe { *kernel.get_unchecked(0) };
 
@@ -195,5 +242,10 @@ where
         }
 
         Ok(())
+    }
+
+    fn scratch_size(&self, input_size: usize, filter_size: usize, filter_center: isize) -> usize {
+        let paddings = ConvolvePaddings::from_filter(filter_size, filter_center);
+        input_size + paddings.padding_right + paddings.padding_left
     }
 }

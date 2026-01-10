@@ -171,11 +171,11 @@ where
             let mut levels_store = Vec::with_capacity(levels);
 
             for _ in 0..levels {
-                if filter_length > signal.len() {
+                if filter_length > current_signal.len() {
                     return Err(OscletError::BufferWasTooSmallForLevel);
                 }
 
-                let dwt_size = self.intercepted.dwt_size(signal.len());
+                let dwt_size = self.intercepted.dwt_size(current_signal.len());
 
                 approx = try_vec![T::default(); dwt_size.approx_length];
                 details = try_vec![T::default(); dwt_size.details_length];
@@ -254,5 +254,25 @@ mod tests {
                 x
             );
         });
+    }
+
+    #[test]
+    fn test_db4_even_big_mdwt() {
+        let data_length = 86;
+        let mut input = vec![0.; data_length];
+        for i in 0..data_length {
+            input[i] = i as f32 / data_length as f32;
+        }
+        let db4 = CompletedDwtExecutor {
+            intercepted: Arc::new(Wavelet8Taps::new(
+                BorderMode::Wrap,
+                DaubechiesFamily::Db4
+                    .get_wavelet()
+                    .as_ref()
+                    .try_into()
+                    .unwrap(),
+            )),
+        };
+        _ = db4.multi_dwt(&input, 4).unwrap();
     }
 }

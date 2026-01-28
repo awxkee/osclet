@@ -452,4 +452,17 @@ mod tests {
             assert!((o - re).abs() < 1e-3, "Reconstruction difference should be less than 1e-3, but it's not for original o {o}, restored {re} at idx {idx}");
         });
     }
+
+    #[test]
+    fn test_db4_even_big_mdwt() {
+        let data_length = 86;
+        let mut input = vec![0.; data_length];
+        for i in 0..data_length {
+            input[i] = i as f32 / data_length as f32;
+        }
+        let i16_cdf53 = Cdf53::<f32> {
+            phantom0: Default::default(),
+        };
+        _ = i16_cdf53.multi_dwt(&input, 4).unwrap();
+    }
 }

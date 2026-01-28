@@ -29,10 +29,9 @@
 use crate::err::{OscletError, try_vec};
 use crate::{
     Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor,
-    MultiDwt,
+    MultiDwt, WaveletSample,
 };
-use num_traits::{AsPrimitive, MulAdd};
-use std::ops::{Add, Mul};
+use num_traits::AsPrimitive;
 use std::sync::Arc;
 
 pub(crate) struct CompletedDwtExecutor<T> {
@@ -96,8 +95,7 @@ impl<T> IncompleteDwtExecutor<T> for CompletedDwtExecutor<T> {
     }
 }
 
-impl<T: Copy + Default + MulAdd<T, Output = T> + Add<T, Output = T> + Mul<T, Output = T> + 'static>
-    DwtExecutor<T> for CompletedDwtExecutor<T>
+impl<T: WaveletSample> DwtExecutor<T> for CompletedDwtExecutor<T>
 where
     f64: AsPrimitive<T>,
 {
@@ -126,7 +124,7 @@ where
                     return Err(OscletError::BufferWasTooSmallForLevel);
                 }
 
-                let dwt_size = self.intercepted.dwt_size(signal.len());
+                let dwt_size = self.intercepted.dwt_size(current_signal.len());
 
                 approx = try_vec![T::default(); dwt_size.approx_length];
                 details = try_vec![T::default(); dwt_size.details_length];

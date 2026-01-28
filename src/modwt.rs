@@ -184,13 +184,13 @@ impl<T: WaveletSample> MoDwtHandler<T> {
         convolution: Box<dyn Convolve1d<T> + Send + Sync>,
     ) -> Self {
         let h = wavelet
-            .dec_hi
+            .dec_lo
             .iter()
             .map(|&x| x * T::FRAC_SQRT2)
             .collect::<Vec<_>>();
 
         let g = wavelet
-            .dec_lo
+            .dec_hi
             .iter()
             .map(|&x| x * T::FRAC_SQRT2)
             .collect::<Vec<_>>();
@@ -207,8 +207,8 @@ impl<T: WaveletSample> MoDwtHandler<T> {
         wavelet: Wavelet<T>,
         convolution: Box<dyn Convolve1d<T> + Send + Sync>,
     ) -> Self {
-        let h = wavelet.dec_hi.to_vec();
-        let g = wavelet.dec_lo.to_vec();
+        let h = wavelet.dec_lo.to_vec();
+        let g = wavelet.dec_hi.to_vec();
 
         Self {
             h,
@@ -237,7 +237,7 @@ where
             *dst = h;
         }
 
-        new_kernel = new_kernel.iter().copied().rev().collect();
+        new_kernel = new_kernel.into_iter().rev().collect();
 
         let filter_offset = if self.stationary_wavelet_transform {
             0
@@ -388,7 +388,7 @@ where
                 self.circular_convolve(&input_proxy, approximation, &self.h, j + 1)?;
                 self.circular_convolve(&input_proxy, detail, &self.g, j + 1)?;
 
-                input_proxy = detail.to_vec();
+                input_proxy = approximation.to_vec();
             }
 
             Ok(())
@@ -433,7 +433,7 @@ where
                     details: details.to_vec(),
                 });
 
-                delegated_input = details.to_vec();
+                delegated_input = approx.to_vec();
             }
 
             Ok(MultiDwt { levels })
@@ -673,7 +673,7 @@ mod tests {
         );
         let result = handler.dwt(&input, 0).unwrap();
 
-        result.approximations.iter().enumerate().for_each(|(i, x)| {
+        result.details.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (R[i] - x).abs() < 1e-7,
                 "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
@@ -681,7 +681,7 @@ mod tests {
                 x
             );
         });
-        result.details.iter().enumerate().for_each(|(i, x)| {
+        result.approximations.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (G[i] - x).abs() < 1e-7,
                 "details difference expected to be < 1e-7, but values were ref {}, derived {}",
@@ -741,7 +741,7 @@ mod tests {
         );
         let result = handler.dwt(&input, 1).unwrap();
 
-        result.approximations.iter().enumerate().for_each(|(i, x)| {
+        result.details.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (R[i] - x).abs() < 1e-7,
                 "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
@@ -749,7 +749,7 @@ mod tests {
                 x
             );
         });
-        result.details.iter().enumerate().for_each(|(i, x)| {
+        result.approximations.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (G[i] - x).abs() < 1e-7,
                 "details difference expected to be < 1e-7, but values were ref {}, derived {}",
@@ -959,7 +959,7 @@ mod tests {
             f64::make_convolution_1d(BorderMode::Wrap),
         );
         let result = handler.dwt(&input, 0).unwrap();
-        result.approximations.iter().enumerate().for_each(|(i, x)| {
+        result.details.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (R[i] - x).abs() < 1e-7,
                 "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
@@ -967,7 +967,7 @@ mod tests {
                 x
             );
         });
-        result.details.iter().enumerate().for_each(|(i, x)| {
+        result.approximations.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (G[i] - x).abs() < 1e-7,
                 "details difference expected to be < 1e-7, but values were ref {}, derived {}",
@@ -1026,7 +1026,7 @@ mod tests {
             f64::make_convolution_1d(BorderMode::Wrap),
         );
         let result = handler.dwt(&input, 0).unwrap();
-        result.approximations.iter().enumerate().for_each(|(i, x)| {
+        result.details.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (R[i] - x).abs() < 1e-7,
                 "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
@@ -1034,7 +1034,7 @@ mod tests {
                 x
             );
         });
-        result.details.iter().enumerate().for_each(|(i, x)| {
+        result.approximations.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (G[i] - x).abs() < 1e-7,
                 "details difference expected to be < 1e-7, but values were ref {}, derived {}",
@@ -1093,7 +1093,7 @@ mod tests {
             f64::make_convolution_1d(BorderMode::Wrap),
         );
         let result = handler.dwt(&input, 3).unwrap();
-        result.approximations.iter().enumerate().for_each(|(i, x)| {
+        result.details.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (R[i] - x).abs() < 1e-7,
                 "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
@@ -1101,7 +1101,7 @@ mod tests {
                 x
             );
         });
-        result.details.iter().enumerate().for_each(|(i, x)| {
+        result.approximations.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (G[i] - x).abs() < 1e-7,
                 "details difference expected to be < 1e-7, but values were ref {}, derived {}",
@@ -1162,7 +1162,7 @@ mod tests {
             f64::make_convolution_1d(BorderMode::Wrap),
         );
         let result = handler.dwt(&input, 0).unwrap();
-        result.approximations.iter().enumerate().for_each(|(i, x)| {
+        result.details.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (R[i] - x).abs() < 1e-7,
                 "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
@@ -1170,7 +1170,7 @@ mod tests {
                 x
             );
         });
-        result.details.iter().enumerate().for_each(|(i, x)| {
+        result.approximations.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (G[i] - x).abs() < 1e-7,
                 "details difference expected to be < 1e-7, but values were ref {}, derived {}",
@@ -1231,7 +1231,7 @@ mod tests {
             f64::make_convolution_1d(BorderMode::Wrap),
         );
         let result = handler.dwt(&input, 0).unwrap();
-        result.approximations.iter().enumerate().for_each(|(i, x)| {
+        result.details.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (R[i] - x).abs() < 1e-7,
                 "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
@@ -1239,7 +1239,7 @@ mod tests {
                 x
             );
         });
-        result.details.iter().enumerate().for_each(|(i, x)| {
+        result.approximations.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (G[i] - x).abs() < 1e-7,
                 "details difference expected to be < 1e-7, but values were ref {}, derived {}",
@@ -1298,7 +1298,7 @@ mod tests {
             f64::make_convolution_1d(BorderMode::Wrap),
         );
         let result = handler.dwt(&input, 1).unwrap();
-        result.approximations.iter().enumerate().for_each(|(i, x)| {
+        result.details.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (R[i] - x).abs() < 1e-7,
                 "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
@@ -1306,7 +1306,7 @@ mod tests {
                 x
             );
         });
-        result.details.iter().enumerate().for_each(|(i, x)| {
+        result.approximations.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (G[i] - x).abs() < 1e-7,
                 "details difference expected to be < 1e-7, but values were ref {}, derived {}",

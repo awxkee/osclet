@@ -132,6 +132,7 @@ where
         0
     }
 
+    #[inline]
     fn dwt_size(&self, input_length: usize) -> DwtSize {
         DwtSize {
             approx_length: input_length.div_ceil(2).max(2),
@@ -154,6 +155,19 @@ where
         let n = approx.len() + details.len();
         if n != output.len() {
             return Err(OscletError::OutputSizeIsNotValid(output.len(), n));
+        }
+        let inputs_size = self.dwt_size(output.len());
+        if inputs_size.approx_length != approx.len() {
+            return Err(OscletError::ApproxSizeNotMatches(
+                inputs_size.approx_length,
+                approx.len(),
+            ));
+        }
+        if inputs_size.details_length != details.len() {
+            return Err(OscletError::ApproxSizeNotMatches(
+                inputs_size.approx_length,
+                approx.len(),
+            ));
         }
         if n < 3 {
             return Err(OscletError::MinFilterSize(n, 3));

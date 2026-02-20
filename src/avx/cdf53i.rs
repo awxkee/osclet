@@ -184,7 +184,14 @@ where
 }
 
 impl<
-    T: Copy + AsPrimitive<V> + 'static + SubAssign + Default + WrappingSub<Output = T>,
+    T: Copy
+        + AsPrimitive<V>
+        + 'static
+        + SubAssign
+        + Default
+        + WrappingSub<Output = T>
+        + WrappingAdd<Output = T>
+        + AddAssign,
     V: Copy
         + 'static
         + Add<V, Output = V>
@@ -212,7 +219,14 @@ where
 }
 
 impl<
-    T: Copy + AsPrimitive<V> + 'static + SubAssign + Default + WrappingSub<Output = T>,
+    T: Copy
+        + AsPrimitive<V>
+        + 'static
+        + SubAssign
+        + Default
+        + WrappingSub<Output = T>
+        + AddAssign
+        + WrappingAdd<Output = T>,
     V: Copy
         + 'static
         + Add<V, Output = V>
@@ -235,6 +249,19 @@ where
         let n = approx.len() + details.len();
         if n != output.len() {
             return Err(OscletError::OutputSizeIsNotValid(output.len(), n));
+        }
+        let inputs_size = self.dwt_size(output.len());
+        if inputs_size.approx_length != approx.len() {
+            return Err(OscletError::ApproxSizeNotMatches(
+                inputs_size.approx_length,
+                approx.len(),
+            ));
+        }
+        if inputs_size.details_length != details.len() {
+            return Err(OscletError::ApproxSizeNotMatches(
+                inputs_size.approx_length,
+                approx.len(),
+            ));
         }
         if n < 3 {
             return Err(OscletError::MinFilterSize(n, 3));

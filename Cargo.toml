@@ -4,7 +4,7 @@ exclude = ["fuzz"]
 
 [package]
 name = "osclet"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2024"
 description = "Play with wavelets! Or they will play with you."
 readme = "README.md"
@@ -23,7 +23,7 @@ rust-version = "1.87.0"
 num-traits = "0.2.19"
 
 [dev-dependencies]
-rand = "0.9.2"
+rand = "0.10.0"
 
 [features]
 default = ["neon", "avx", "sse"]

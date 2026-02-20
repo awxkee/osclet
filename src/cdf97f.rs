@@ -218,6 +218,19 @@ where
         if n != output.len() {
             return Err(OscletError::OutputSizeIsNotValid(output.len(), n));
         }
+        let inputs_size = self.dwt_size(output.len());
+        if inputs_size.approx_length != approx.len() {
+            return Err(OscletError::ApproxSizeNotMatches(
+                inputs_size.approx_length,
+                approx.len(),
+            ));
+        }
+        if inputs_size.details_length != details.len() {
+            return Err(OscletError::ApproxSizeNotMatches(
+                inputs_size.approx_length,
+                approx.len(),
+            ));
+        }
         if n < 4 {
             return Err(OscletError::MinFilterSize(n, 4));
         }

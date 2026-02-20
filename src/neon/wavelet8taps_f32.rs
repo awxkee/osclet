@@ -414,7 +414,6 @@ impl IncompleteDwtExecutor<f32> for NeonWavelet8TapsF32 {
 mod tests {
     use super::*;
     use crate::{DaubechiesFamily, WaveletFilterProvider};
-    use rand::Rng;
 
     #[test]
     fn test_db8_odd() {
@@ -553,6 +552,7 @@ mod tests {
 
     #[test]
     fn test_db8_even_big() {
+        use rand::RngExt;
         let data_length = 141;
         let mut input = vec![0.; data_length];
         for i in 0..data_length {

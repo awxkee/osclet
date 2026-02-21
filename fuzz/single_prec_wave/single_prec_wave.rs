@@ -40,5 +40,5 @@ fuzz_target!(|data: Data| {
     let executor =
         Osclet::make_custom_f32(Arc::new(WaveletProvider { wavelet }), BorderMode::Wrap).unwrap();
     let dwt = executor.dwt(&signal, 1).unwrap();
-    _ = executor.idwt(&dwt).unwrap();
+    _ = executor.idwt(&dwt.to_ref()).unwrap();
 });

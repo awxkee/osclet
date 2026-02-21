@@ -322,6 +322,8 @@ where
 
 macro_rules! define_integer_cdf {
     ($clazz: ident, $min_taps: expr) => {
+        use crate::DwtRef;
+        use crate::MultiLevelDwtRef;
         impl<
             T: Copy
                 + AsPrimitive<V>
@@ -433,10 +435,35 @@ macro_rules! define_integer_cdf {
                 }
             }
 
-            fn idwt(&self, dwt: &Dwt<T>) -> Result<Vec<T>, OscletError> {
+            fn idwt(&self, dwt: &DwtRef<'_, T>) -> Result<Vec<T>, OscletError> {
                 let mut output = try_vec![T::default(); dwt.details.len() + dwt.approximations.len()];
 
                 self.execute_inverse(&dwt.approximations, &dwt.details, &mut output)?;
+
+                Ok(output)
+            }
+
+            fn multi_idwt(&self, dwt: &MultiLevelDwtRef<'_, T>) -> Result<Vec<T>, OscletError> {
+                if dwt.details.is_empty() || dwt.approximations.is_empty() {
+                    return Err(OscletError::ZeroedBaseSize);
+                }
+                let mut current_approximations = dwt.approximations;
+                let mut output = self.idwt(&DwtRef {
+                    approximations: current_approximations,
+                    details: dwt.details.last().unwrap(),
+                })?;
+                if dwt.details.len() == 1 {
+                    return Ok(output);
+                }
+                let details_remainder = &dwt.details[..dwt.details.len() - 1];
+                current_approximations = &output;
+                for details in details_remainder.iter().rev() {
+                    output = self.idwt(&DwtRef {
+                        approximations: current_approximations,
+                        details,
+                    })?;
+                    current_approximations = &output;
+                }
 
                 Ok(output)
             }

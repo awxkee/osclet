@@ -122,8 +122,10 @@ impl SseWavelet2TapsF64 {
             let h0 = _mm_loadu_pd(self.high_pass.as_ptr());
 
             for (i, (approx, detail)) in approx
-                .chunks_exact_mut(2)
-                .zip(details.chunks_exact_mut(2))
+                .as_chunks_mut::<2>()
+                .0
+                .iter_mut()
+                .zip(details.as_chunks_mut::<2>().0.iter_mut())
                 .enumerate()
             {
                 let base0 = 2 * 2 * i;
@@ -407,8 +409,10 @@ impl SseWavelet2TapsF32 {
             let mut processed = 0usize;
 
             for (i, (approx, detail)) in approx
-                .chunks_exact_mut(8)
-                .zip(details.chunks_exact_mut(8))
+                .as_chunks_mut::<8>()
+                .0
+                .iter_mut()
+                .zip(details.as_chunks_mut::<8>().0.iter_mut())
                 .enumerate()
             {
                 let base0 = 2 * 8 * i;
@@ -452,8 +456,10 @@ impl SseWavelet2TapsF32 {
             processed = 0;
 
             for (i, (approx, detail)) in approx
-                .chunks_exact_mut(4)
-                .zip(details.chunks_exact_mut(4))
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(details.as_chunks_mut::<4>().0.iter_mut())
                 .enumerate()
             {
                 let base0 = 2 * 4 * i;

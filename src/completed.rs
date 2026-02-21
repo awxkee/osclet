@@ -28,8 +28,8 @@
  */
 use crate::err::{OscletError, try_vec};
 use crate::{
-    Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor,
-    MultiDwt, WaveletSample,
+    Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, DwtRef, DwtSize,
+    IncompleteDwtExecutor, MultiDwt, MultiLevelDwtRef, WaveletSample,
 };
 use num_traits::AsPrimitive;
 use std::sync::Arc;
@@ -197,7 +197,7 @@ where
         }
     }
 
-    fn idwt(&self, dwt: &Dwt<T>) -> Result<Vec<T>, OscletError> {
+    fn idwt(&self, dwt: &DwtRef<'_, T>) -> Result<Vec<T>, OscletError> {
         if dwt.details.len() != dwt.approximations.len() {
             return Err(OscletError::ApproxDetailsNotMatches(
                 dwt.approximations.len(),
@@ -211,7 +211,38 @@ where
         let mut output = try_vec![T::default(); output_length];
 
         self.intercepted
-            .execute_inverse(&dwt.approximations, &dwt.details, &mut output)?;
+            .execute_inverse(dwt.approximations, dwt.details, &mut output)?;
+
+        Ok(output)
+    }
+
+    fn multi_idwt(&self, dwt: &MultiLevelDwtRef<'_, T>) -> Result<Vec<T>, OscletError> {
+        if dwt.details.is_empty() || dwt.approximations.is_empty() {
+            return Err(OscletError::ZeroedBaseSize);
+        }
+        let mut current_approximations = dwt.approximations;
+        let mut output = self.idwt(&DwtRef {
+            approximations: current_approximations,
+            details: dwt.details.last().unwrap(),
+        })?;
+        if dwt.details.len() == 1 {
+            return Ok(output);
+        }
+        let details_remainder = &dwt.details[..dwt.details.len() - 1];
+        current_approximations = &output;
+        for details in details_remainder.iter().rev() {
+            if current_approximations.len() < details.len() {
+                return Err(OscletError::ApproxDetailsNotMatches(
+                    current_approximations.len(),
+                    details.len(),
+                ));
+            }
+            output = self.idwt(&DwtRef {
+                approximations: &current_approximations[..details.len()],
+                details,
+            })?;
+            current_approximations = &output;
+        }
 
         Ok(output)
     }
@@ -243,7 +274,7 @@ mod tests {
         };
         let dwt = db4.dwt(&input, 1).unwrap();
 
-        let reconstructed = db4.idwt(&dwt).unwrap();
+        let reconstructed = db4.idwt(&dwt.to_ref()).unwrap();
         reconstructed.iter().take(input.len()).enumerate().for_each(|(i, x)| {
             assert!(
                 (input[i] - x).abs() < 1e-7,

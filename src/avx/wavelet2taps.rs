@@ -117,8 +117,10 @@ impl AvxWavelet2TapsF64 {
             let h0 = _mm256_loadu_pd(self.high_pass.as_ptr());
 
             for (i, (approx, detail)) in approx
-                .chunks_exact_mut(2)
-                .zip(details.chunks_exact_mut(2))
+                .as_chunks_mut::<2>()
+                .0
+                .iter_mut()
+                .zip(details.as_chunks_mut::<2>().0.iter_mut())
                 .enumerate()
             {
                 let base0 = 2 * 2 * i;

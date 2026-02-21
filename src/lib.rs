@@ -297,6 +297,28 @@ impl<T> Dwt<T> {
     }
 }
 
+/// Represents the result of a **multi-level DWT**.
+/// # Level Ordering
+/// `details` must be stored in **forward decomposition order**: the first element corresponds
+/// to the finest scale (level 1), and the last element corresponds to the coarsest scale
+/// (level N). The length of the final detail slice must match the length of `approximations`,
+/// as both are produced from the same (coarsest) approximation at the deepest decomposition level.
+///
+/// # Example Layout (3-level decomposition of signal length 64)
+/// ```text
+/// details[0] → level 1 details, length 32  (finest scale)
+/// details[1] → level 2 details, length 16
+/// details[2] → level 3 details, length 8   (coarsest scale)
+/// approximations               → length 8   (must match details[2])
+/// ```
+#[derive(Debug)]
+pub struct MultiLevelDwtRef<'a, T> {
+    /// Approximation (low-pass) coefficients of the signal.
+    pub approximations: &'a [T],
+    /// Detail (high-pass) coefficients of the signal.
+    pub details: Vec<&'a [T]>,
+}
+
 /// Represents the result of a **single-level DWT**.
 #[derive(Debug, Clone)]
 pub struct DwtRef<'a, T> {
@@ -310,6 +332,25 @@ pub struct DwtRef<'a, T> {
 pub struct MultiDwt<T> {
     /// Approximations for each level (outer Vec: levels, inner Vec: coefficients).
     pub levels: Vec<Dwt<T>>,
+}
+
+impl<T: ToOwned> MultiDwt<T> {
+    pub fn to_ref(&self) -> MultiLevelDwtRef<'_, T> {
+        if self.levels.is_empty() {
+            return MultiLevelDwtRef {
+                approximations: &[],
+                details: vec![],
+            };
+        }
+        MultiLevelDwtRef {
+            approximations: self.levels.last().unwrap().approximations.as_slice(),
+            details: self
+                .levels
+                .iter()
+                .map(|x| x.details.as_slice())
+                .collect::<Vec<_>>(),
+        }
+    }
 }
 
 /// Full DWT executor trait combining forward, inverse, and multi-level operations.
@@ -342,7 +383,19 @@ pub trait DwtExecutor<T>: IncompleteDwtExecutor<T> + Send + Sync {
     /// # Returns
     /// - `Ok(Vec<T>)` containing the reconstructed time-domain signal.
     /// - `Err(OscletError)` if reconstruction fails, for example due to invalid coefficient lengths.
-    fn idwt(&self, dwt: &Dwt<T>) -> Result<Vec<T>, OscletError>;
+    fn idwt(&self, dwt: &DwtRef<'_, T>) -> Result<Vec<T>, OscletError>;
+    /// Performs the inverse multi-level Discrete Wavelet Transform to reconstruct the original
+    /// signal from all decomposition levels.
+    ///
+    /// # Parameters
+    /// - `dwt`: A [`MultiLevelDwtRef<'_, T>`] containing the approximation and detail coefficients
+    ///   for each decomposition level, as produced by [`multi_dwt`](Self::multi_dwt).
+    ///
+    /// # Returns
+    /// - `Ok(Vec<T>)` containing the reconstructed time-domain signal.
+    /// - `Err(OscletError)` if reconstruction fails, for example due to mismatched level counts
+    ///   or invalid coefficient lengths.
+    fn multi_idwt(&self, dwt: &MultiLevelDwtRef<'_, T>) -> Result<Vec<T>, OscletError>;
 }
 
 /// Factory and utility struct for creating wavelet and MODWT executors.

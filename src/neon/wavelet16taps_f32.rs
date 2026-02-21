@@ -167,8 +167,10 @@ impl DwtForwardExecutor<f32> for NeonWavelet16TapsF32 {
             let mut processed = 0usize;
 
             for (i, (approx, detail)) in approx
-                .chunks_exact_mut(2)
-                .zip(details.chunks_exact_mut(2))
+                .as_chunks_mut::<2>()
+                .0
+                .iter_mut()
+                .zip(details.as_chunks_mut::<2>().0.iter_mut())
                 .enumerate()
             {
                 let base = 2 * 2 * i;

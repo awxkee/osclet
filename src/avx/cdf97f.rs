@@ -350,7 +350,9 @@ where
 
         // Interleave approx and detail to reconstruct signal
         for ((dst, &src_even), &src_odd) in output
-            .chunks_exact_mut(2)
+            .as_chunks_mut::<2>()
+            .0
+            .iter_mut()
             .zip(approx_inv.iter())
             .zip(detail_inv.iter())
         {

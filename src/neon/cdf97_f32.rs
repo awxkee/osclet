@@ -29,8 +29,8 @@
 use crate::err::{OscletError, try_vec};
 use crate::mla::fmla;
 use crate::{
-    Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor,
-    MultiDwt,
+    Dwt, DwtExecutor, DwtForwardExecutor, DwtInverseExecutor, DwtRef, DwtSize,
+    IncompleteDwtExecutor, MultiDwt, MultiLevelDwtRef,
 };
 use std::arch::aarch64::*;
 
@@ -164,8 +164,10 @@ fn dwt97_forward_update_odd(approx: &[f32], details: &mut [f32], c: f32) {
         }
     }
 
-    let q_details = details.chunks_exact_mut(16).into_remainder();
-    let q_approx = approx.chunks_exact(16).remainder();
+    let chunks_count = approx_next.chunks_exact(16).len();
+
+    let q_details = &mut details[chunks_count * 16..];
+    let q_approx = &approx[chunks_count * 16..];
     let q_approx_next = approx_next.chunks_exact(16).remainder();
 
     for ((dst, &src_left), &src_right) in q_details
@@ -335,7 +337,9 @@ impl DwtInverseExecutor<f32> for NeonCdf97F32 {
 
         // Interleave approx and detail to reconstruct signal
         for ((dst, &src_even), &src_odd) in output
-            .chunks_exact_mut(2)
+            .as_chunks_mut::<2>()
+            .0
+            .iter_mut()
             .zip(approx_inv.iter())
             .zip(detail_inv.iter())
         {
@@ -451,9 +455,34 @@ impl DwtExecutor<f32> for NeonCdf97F32 {
         }
     }
 
-    fn idwt(&self, dwt: &Dwt<f32>) -> Result<Vec<f32>, OscletError> {
+    fn idwt(&self, dwt: &DwtRef<'_, f32>) -> Result<Vec<f32>, OscletError> {
         let mut output = try_vec![f32::default(); dwt.details.len() + dwt.approximations.len()];
-        self.execute_inverse(&dwt.approximations, &dwt.details, &mut output)?;
+        self.execute_inverse(dwt.approximations, dwt.details, &mut output)?;
+        Ok(output)
+    }
+
+    fn multi_idwt(&self, dwt: &MultiLevelDwtRef<'_, f32>) -> Result<Vec<f32>, OscletError> {
+        if dwt.details.is_empty() || dwt.approximations.is_empty() {
+            return Err(OscletError::ZeroedBaseSize);
+        }
+        let mut current_approximations = dwt.approximations;
+        let mut output = self.idwt(&DwtRef {
+            approximations: current_approximations,
+            details: dwt.details.last().unwrap(),
+        })?;
+        if dwt.details.len() == 1 {
+            return Ok(output);
+        }
+        let details_remainder = &dwt.details[..dwt.details.len() - 1];
+        current_approximations = &output;
+        for details in details_remainder.iter().rev() {
+            output = self.idwt(&DwtRef {
+                approximations: current_approximations,
+                details,
+            })?;
+            current_approximations = &output;
+        }
+
         Ok(output)
     }
 }

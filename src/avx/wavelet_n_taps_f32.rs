@@ -125,8 +125,10 @@ impl AvxWaveletNTapsF32 {
             let mut processed = 0usize;
 
             for (i, (approx, detail)) in approx
-                .chunks_exact_mut(4)
-                .zip(details.chunks_exact_mut(4))
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(details.as_chunks_mut::<4>().0.iter_mut())
                 .enumerate()
             {
                 let mut a0 = _mm256_setzero_ps();
@@ -208,8 +210,10 @@ impl AvxWaveletNTapsF32 {
             processed = 0usize;
 
             for (i, (approx, detail)) in approx
-                .chunks_exact_mut(2)
-                .zip(details.chunks_exact_mut(2))
+                .as_chunks_mut::<2>()
+                .0
+                .iter_mut()
+                .zip(details.as_chunks_mut::<2>().0.iter_mut())
                 .enumerate()
             {
                 let mut a0 = _mm_setzero_ps();

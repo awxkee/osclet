@@ -25,11 +25,20 @@ num-traits = "0.2.19"
 [dev-dependencies]
 rand = "0.10.0"
 
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+getrandom = { version = "0.4.2", features = ["wasm_js"] }
+wasm-bindgen-test = "0.3.64"
+
 [features]
-default = ["neon", "avx", "sse"]
+default = ["neon", "avx", "sse", "wasm"]
+# AVX2 + FMA SIMD
 avx = []
+# NEON SIMD
 neon = []
+# SSE 4.2
 sse = []
+# Wasm SIMD128
+wasm = []
 
 [package.metadata.docs.rs]
 # To build locally:

@@ -72,7 +72,15 @@ impl ConvolveFactory<f32> for f32 {
                 return Box::new(SseConvolution1dF32 { border_mode });
             }
         }
-        #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
+        #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+        {
+            use crate::wasm::WasmConvolution1dF32;
+            Box::new(WasmConvolution1dF32 { border_mode })
+        }
+        #[cfg(not(any(
+            all(target_arch = "aarch64", feature = "neon"),
+            all(target_arch = "wasm32", feature = "wasm")
+        )))]
         {
             Box::new(ScalarConvolution1d {
                 phantom_data: PhantomData,
@@ -105,7 +113,15 @@ impl ConvolveFactory<f64> for f64 {
                 return Box::new(SseConvolution1dF64 { border_mode });
             }
         }
-        #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
+        #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+        {
+            use crate::wasm::WasmConvolution1dF64;
+            Box::new(WasmConvolution1dF64 { border_mode })
+        }
+        #[cfg(not(any(
+            all(target_arch = "aarch64", feature = "neon"),
+            all(target_arch = "wasm32", feature = "wasm")
+        )))]
         {
             Box::new(ScalarConvolution1d {
                 phantom_data: PhantomData,

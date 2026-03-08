@@ -68,6 +68,8 @@ mod t2;
 mod transpose;
 mod util;
 mod vaidyanathan;
+#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+mod wasm;
 mod wavelet10taps;
 mod wavelet12taps;
 mod wavelet16taps;
@@ -995,5 +997,72 @@ impl Osclet {
             filter,
             transpose: i16::transpositor(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::RngExt;
+    use std::borrow::Cow;
+    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    struct WaveletProvider<T> {
+        wavelet: Vec<T>,
+    }
+
+    impl<T: Clone> WaveletFilterProvider<T> for WaveletProvider<T>
+    where
+        [T]: ToOwned<Owned = Vec<T>>,
+    {
+        fn get_wavelet(&self) -> Cow<'_, [T]> {
+            Cow::Borrowed(self.wavelet.as_slice())
+        }
+    }
+
+    fn run_osclet_scenario(length: u16, wavelet_length: u8) {
+        if length == 0 || wavelet_length == 0 || !wavelet_length.is_multiple_of(2) {
+            return;
+        }
+        if length < wavelet_length as u16 {
+            return;
+        }
+
+        let wavelet: Vec<f32> = (0..wavelet_length as usize)
+            .map(|i| i as f32 / wavelet_length as f32)
+            .collect();
+
+        let signal: Vec<f32> = (0..length as usize)
+            .map(|i| i as f32 / length as f32)
+            .collect();
+
+        let executor =
+            Osclet::make_custom_f32(Arc::new(WaveletProvider { wavelet }), BorderMode::Wrap)
+                .unwrap();
+
+        let dwt = executor.dwt(&signal, 1).unwrap();
+        let _ = executor.idwt(&dwt.to_ref()).unwrap();
+    }
+
+    #[test]
+    fn test_f32_cases() {
+        for wavelet_length in (2u8..=84).step_by(2) {
+            for _ in 0..64 {
+                let length = rand::rng().random_range(wavelet_length as u16..512);
+                run_osclet_scenario(length, wavelet_length);
+            }
+        }
+    }
+
+    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+    #[wasm_bindgen_test]
+    fn test_f32_cases_wasm() {
+        for wavelet_length in (2u8..=84).step_by(2) {
+            for _ in 0..64 {
+                let length = rand::rng().random_range(wavelet_length as u16..512);
+                run_osclet_scenario(length, wavelet_length);
+            }
+        }
     }
 }

@@ -1,5 +1,5 @@
 /*
- * // Copyright (c) Radzivon Bartoshyk 12/2025. All rights reserved.
+ * // Copyright (c) Radzivon Bartoshyk 3/2026. All rights reserved.
  * //
  * // Redistribution and use in source and binary forms, with or without modification,
  * // are permitted provided that the following conditions are met:
@@ -28,35 +28,20 @@
  */
 mod convolve1d_f32;
 mod convolve1d_f64;
-mod sse_vector;
-mod sse_vector_d;
-mod util;
-mod wavelet10taps_f32;
-mod wavelet10taps_f64;
-mod wavelet12taps_f32;
-mod wavelet12taps_f64;
+mod wasm_vector;
+mod wasm_vector_d;
 mod wavelet2taps;
 mod wavelet4taps_f32;
-mod wavelet4taps_f64;
 mod wavelet6taps_f32;
-mod wavelet6taps_f64;
 mod wavelet8taps_f32;
-mod wavelet8taps_f64;
 mod wavelet_n_taps_f32;
 mod wavelet_n_taps_f64;
 
-pub(crate) use convolve1d_f32::SseConvolution1dF32;
-pub(crate) use convolve1d_f64::SseConvolution1dF64;
-pub(crate) use wavelet_n_taps_f32::SseWaveletNTapsF32;
-pub(crate) use wavelet_n_taps_f64::SseWaveletNTapsF64;
-pub(crate) use wavelet2taps::{SseWavelet2TapsF32, SseWavelet2TapsF64};
-pub(crate) use wavelet4taps_f32::SseWavelet4TapsF32;
-pub(crate) use wavelet4taps_f64::SseWavelet4TapsF64;
-pub(crate) use wavelet6taps_f32::SseWavelet6TapsF32;
-pub(crate) use wavelet6taps_f64::SseWavelet6TapsF64;
-pub(crate) use wavelet8taps_f32::SseWavelet8TapsF32;
-pub(crate) use wavelet8taps_f64::SseWavelet8TapsF64;
-pub(crate) use wavelet10taps_f32::SseWavelet10TapsF32;
-pub(crate) use wavelet10taps_f64::SseWavelet10TapsF64;
-pub(crate) use wavelet12taps_f32::SseWavelet12TapsF32;
-pub(crate) use wavelet12taps_f64::SseWavelet12TapsF64;
+pub(crate) use convolve1d_f32::WasmConvolution1dF32;
+pub(crate) use convolve1d_f64::WasmConvolution1dF64;
+pub(crate) use wavelet_n_taps_f32::WasmWaveletNTapsF32;
+pub(crate) use wavelet_n_taps_f64::WasmWaveletNTapsF64;
+pub(crate) use wavelet2taps::{WasmWavelet2TapsF32, WasmWavelet2TapsF64};
+pub(crate) use wavelet4taps_f32::WasmWavelet4TapsF32;
+pub(crate) use wavelet6taps_f32::WasmWavelet6TapsF32;
+pub(crate) use wavelet8taps_f32::WasmWavelet8TapsF32;

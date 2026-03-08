@@ -622,9 +622,80 @@ mod tests {
     use crate::convolve1d::ConvolveFactory;
     use crate::util::fill_wavelet;
     use crate::{BorderMode, DaubechiesFamily, WaveletFilterProvider};
+    #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+    use wasm_bindgen_test::wasm_bindgen_test;
 
     #[test]
     fn test_modwt() {
+        const R: [f64; 16] = [
+            0.2933012701892219,
+            -0.34330127018922196,
+            -0.11895825622994272,
+            0.0,
+            1.0245190528383288,
+            -0.06698729810778081,
+            -0.0915063509461096,
+            -0.6830127018922193,
+            -0.3196152422706633,
+            -0.9586696879329399,
+            2.5532849302036027,
+            -2.0158493649053892,
+            1.0346315822562817,
+            1.6369546181365429,
+            -1.2256569860407205,
+            -0.7191342951089922,
+        ];
+
+        const G: [f64; 16] = [
+            0.6151923788646684,
+            0.9151923788646683,
+            1.0779328524455039,
+            1.6339745962155612,
+            2.90849364905389,
+            3.6160254037844384,
+            2.707531754730548,
+            1.1830127018922192,
+            0.2803847577293368,
+            0.3770998275257337,
+            2.571715069796397,
+            4.45915063509461,
+            4.177932852445504,
+            5.374519052838329,
+            5.310816684934151,
+            2.091025403784439,
+        ];
+
+        let input = vec![
+            1.0, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3,
+        ];
+
+        let handler = MoDwtHandler::new(
+            fill_wavelet(&DaubechiesFamily::Db2.get_wavelet()).unwrap(),
+            f64::make_convolution_1d(BorderMode::Wrap),
+        );
+        let result = handler.dwt(&input, 0).unwrap();
+
+        result.details.iter().enumerate().for_each(|(i, x)| {
+            assert!(
+                (R[i] - x).abs() < 1e-7,
+                "approximations difference expected to be < 1e-7, but values were ref {}, derived {}",
+                R[i],
+                x
+            );
+        });
+        result.approximations.iter().enumerate().for_each(|(i, x)| {
+            assert!(
+                (G[i] - x).abs() < 1e-7,
+                "details difference expected to be < 1e-7, but values were ref {}, derived {}",
+                G[i],
+                x
+            );
+        });
+    }
+
+    #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+    #[wasm_bindgen_test]
+    fn test_modwt_wasm() {
         const R: [f64; 16] = [
             0.2933012701892219,
             -0.34330127018922196,
@@ -1426,6 +1497,33 @@ mod tests {
 
     #[test]
     fn test_modwt_round_trip_multi_f32_db8() {
+        let input = vec![
+            1.0f32, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3,
+            1.0f32, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3,
+            1.0f32, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3,
+            1.0f32, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5,
+        ];
+
+        let handler = MoDwtHandler::<f32>::new(
+            fill_wavelet(&DaubechiesFamily::Db8.get_wavelet()).unwrap(),
+            f32::make_convolution_1d(BorderMode::Wrap),
+        );
+        let result = handler.multi_dwt(&input, 3).unwrap();
+        let inverse = handler.multi_idwt(&result).unwrap();
+
+        inverse.iter().enumerate().for_each(|(i, x)| {
+            assert!(
+                (input[i] - x).abs() < 1e-5,
+                "reconstruct difference expected to be < 1e-7, but values were ref {}, derived {}",
+                input[i],
+                x
+            );
+        });
+    }
+
+    #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+    #[wasm_bindgen_test]
+    fn test_modwt_round_trip_multi_f32_db8_wasm() {
         let input = vec![
             1.0f32, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3,
             1.0f32, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3,

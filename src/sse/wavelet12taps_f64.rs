@@ -27,7 +27,7 @@
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use crate::border_mode::{BorderInterpolation, BorderMode};
-use crate::err::{try_vec, OscletError};
+use crate::err::{OscletError, try_vec};
 use crate::mla::fmla;
 use crate::sse::sse_vector_d::SseVectorD;
 use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr, twelve_taps_size_for_input};

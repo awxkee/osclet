@@ -100,7 +100,15 @@ impl DwtFactory<f32> for f32 {
                 return Arc::new(SseWavelet2TapsF32::new(border_mode, dwt));
             }
         }
-        #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
+        #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+        {
+            use crate::wasm::WasmWavelet2TapsF32;
+            Arc::new(WasmWavelet2TapsF32::new(border_mode, dwt))
+        }
+        #[cfg(not(any(
+            all(target_arch = "aarch64", feature = "neon"),
+            all(target_arch = "wasm32", feature = "wasm")
+        )))]
         {
             use crate::wavelet2taps::Wavelet2Taps;
             Arc::new(Wavelet2Taps::new(border_mode, dwt))
@@ -130,7 +138,15 @@ impl DwtFactory<f32> for f32 {
                 return Arc::new(SseWavelet4TapsF32::new(border_mode, dwt));
             }
         }
-        #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
+        #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+        {
+            use crate::wasm::WasmWavelet4TapsF32;
+            Arc::new(WasmWavelet4TapsF32::new(border_mode, dwt))
+        }
+        #[cfg(not(any(
+            all(target_arch = "aarch64", feature = "neon"),
+            all(target_arch = "wasm32", feature = "wasm")
+        )))]
         {
             use crate::wavelet4taps::Wavelet4Taps;
             Arc::new(Wavelet4Taps::new(border_mode, dwt))
@@ -160,7 +176,15 @@ impl DwtFactory<f32> for f32 {
                 return Arc::new(SseWavelet6TapsF32::new(border_mode, dwt));
             }
         }
-        #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
+        #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+        {
+            use crate::wasm::WasmWavelet6TapsF32;
+            Arc::new(WasmWavelet6TapsF32::new(border_mode, dwt))
+        }
+        #[cfg(not(any(
+            all(target_arch = "aarch64", feature = "neon"),
+            all(target_arch = "wasm32", feature = "wasm")
+        )))]
         {
             use crate::wavelet6taps::Wavelet6Taps;
             Arc::new(Wavelet6Taps::new(border_mode, dwt))
@@ -190,7 +214,15 @@ impl DwtFactory<f32> for f32 {
                 return Arc::new(SseWavelet8TapsF32::new(border_mode, dwt));
             }
         }
-        #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
+        #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+        {
+            use crate::wasm::WasmWavelet8TapsF32;
+            Arc::new(WasmWavelet8TapsF32::new(border_mode, dwt))
+        }
+        #[cfg(not(any(
+            all(target_arch = "aarch64", feature = "neon"),
+            all(target_arch = "wasm32", feature = "wasm")
+        )))]
         {
             use crate::wavelet8taps::Wavelet8Taps;
             Arc::new(Wavelet8Taps::new(border_mode, dwt))
@@ -310,7 +342,15 @@ impl DwtFactory<f32> for f32 {
                 return Arc::new(SseWaveletNTapsF32::new(border_mode, dwt));
             }
         }
-        #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
+        #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+        {
+            use crate::wasm::WasmWaveletNTapsF32;
+            Arc::new(WasmWaveletNTapsF32::new(border_mode, dwt))
+        }
+        #[cfg(not(any(
+            all(target_arch = "aarch64", feature = "neon"),
+            all(target_arch = "wasm32", feature = "wasm")
+        )))]
         {
             use crate::wavelet_n_taps::WaveletNTaps;
             Arc::new(WaveletNTaps::new(border_mode, dwt))
@@ -342,7 +382,15 @@ impl DwtFactory<f64> for f64 {
                 return Arc::new(SseWavelet2TapsF64::new(border_mode, dwt));
             }
         }
-        #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
+        #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+        {
+            use crate::wasm::WasmWavelet2TapsF64;
+            Arc::new(WasmWavelet2TapsF64::new(border_mode, dwt))
+        }
+        #[cfg(not(any(
+            all(target_arch = "aarch64", feature = "neon"),
+            all(target_arch = "wasm32", feature = "wasm")
+        )))]
         {
             use crate::wavelet2taps::Wavelet2Taps;
             Arc::new(Wavelet2Taps::new(border_mode, dwt))
@@ -552,7 +600,15 @@ impl DwtFactory<f64> for f64 {
                 return Arc::new(SseWaveletNTapsF64::new(border_mode, dwt));
             }
         }
-        #[cfg(not(all(target_arch = "aarch64", feature = "neon")))]
+        #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+        {
+            use crate::wasm::WasmWaveletNTapsF64;
+            Arc::new(WasmWaveletNTapsF64::new(border_mode, dwt))
+        }
+        #[cfg(not(any(
+            all(target_arch = "aarch64", feature = "neon"),
+            all(target_arch = "wasm32", feature = "wasm")
+        )))]
         {
             use crate::wavelet_n_taps::WaveletNTaps;
             Arc::new(WaveletNTaps::new(border_mode, dwt))

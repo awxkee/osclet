@@ -1,5 +1,5 @@
 /*
- * // Copyright (c) Radzivon Bartoshyk 12/2025. All rights reserved.
+ * // Copyright (c) Radzivon Bartoshyk 03/2025. All rights reserved.
  * //
  * // Redistribution and use in source and binary forms, with or without modification,
  * // are permitted provided that the following conditions are met:
@@ -28,19 +28,19 @@
  */
 use crate::err::{OscletError, try_vec};
 use crate::mla::fmla;
-use crate::sse::sse_vector::SseVector;
-use crate::sse::sse_vector_d::SseVectorD;
 use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr, two_taps_size_for_input};
+use crate::wasm::wasm_vector::WasmVector;
+use crate::wasm::wasm_vector_d::WasmVectorD;
 use crate::{BorderMode, DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor};
 use num_traits::AsPrimitive;
 
-pub(crate) struct SseWavelet2TapsF64 {
+pub(crate) struct WasmWavelet2TapsF64 {
     border_mode: BorderMode,
     low_pass: [f64; 2],
     high_pass: [f64; 2],
 }
 
-impl SseWavelet2TapsF64 {
+impl WasmWavelet2TapsF64 {
     pub fn new(border_mode: BorderMode, wavelet: &[f64; 2]) -> Self {
         Self {
             border_mode,
@@ -50,7 +50,7 @@ impl SseWavelet2TapsF64 {
     }
 }
 
-impl DwtForwardExecutor<f64> for SseWavelet2TapsF64 {
+impl DwtForwardExecutor<f64> for WasmWavelet2TapsF64 {
     fn execute_forward(
         &self,
         input: &[f64],
@@ -58,7 +58,7 @@ impl DwtForwardExecutor<f64> for SseWavelet2TapsF64 {
         details: &mut [f64],
     ) -> Result<(), OscletError> {
         let mut scratch = try_vec![f64::default(); self.required_scratch_size(input.len())];
-        unsafe { self.execute_forward_impl(input, approx, details, &mut scratch) }
+        self.execute_forward_impl(input, approx, details, &mut scratch)
     }
 
     fn execute_forward_with_scratch(
@@ -68,7 +68,7 @@ impl DwtForwardExecutor<f64> for SseWavelet2TapsF64 {
         details: &mut [f64],
         scratch: &mut [f64],
     ) -> Result<(), OscletError> {
-        unsafe { self.execute_forward_impl(input, approx, details, scratch) }
+        self.execute_forward_impl(input, approx, details, scratch)
     }
 
     fn required_scratch_size(&self, _: usize) -> usize {
@@ -80,8 +80,8 @@ impl DwtForwardExecutor<f64> for SseWavelet2TapsF64 {
     }
 }
 
-impl SseWavelet2TapsF64 {
-    #[target_feature(enable = "sse4.2")]
+impl WasmWavelet2TapsF64 {
+    #[target_feature(enable = "simd128")]
     fn execute_forward_impl(
         &self,
         input: &[f64],
@@ -113,8 +113,8 @@ impl SseWavelet2TapsF64 {
             details.split_at_mut(two_taps_size_for_input(input.len(), details.len()));
 
         unsafe {
-            let l0 = SseVectorD::load(&self.low_pass);
-            let h0 = SseVectorD::load(&self.high_pass);
+            let l0 = WasmVectorD::load(&self.low_pass);
+            let h0 = WasmVectorD::load(&self.high_pass);
 
             for (i, (approx, detail)) in approx
                 .as_chunks_mut::<2>()
@@ -128,8 +128,8 @@ impl SseWavelet2TapsF64 {
                 let input0 = input.get_unchecked(base0..);
                 let input1 = input.get_unchecked(base0 + 2..);
 
-                let xw0 = SseVectorD::load(input0);
-                let xw1 = SseVectorD::load(input1);
+                let xw0 = WasmVectorD::load(input0);
+                let xw1 = WasmVectorD::load(input1);
 
                 let a0 = xw0 * l0;
                 let d0 = xw0 * h0;
@@ -151,7 +151,7 @@ impl SseWavelet2TapsF64 {
 
                 let input = input.get_unchecked(base..);
 
-                let xw = SseVectorD::load(input);
+                let xw = WasmVectorD::load(input);
 
                 let a = (xw * l0).hsum();
                 let d = (xw * h0).hsum();
@@ -187,14 +187,14 @@ impl SseWavelet2TapsF64 {
     }
 }
 
-impl DwtInverseExecutor<f64> for SseWavelet2TapsF64 {
+impl DwtInverseExecutor<f64> for WasmWavelet2TapsF64 {
     fn execute_inverse(
         &self,
         approx: &[f64],
         details: &[f64],
         output: &mut [f64],
     ) -> Result<(), OscletError> {
-        unsafe { self.execute_inverse_impl(approx, details, output) }
+        self.execute_inverse_impl(approx, details, output)
     }
 
     fn idwt_size(&self, input_length: DwtSize) -> usize {
@@ -202,8 +202,8 @@ impl DwtInverseExecutor<f64> for SseWavelet2TapsF64 {
     }
 }
 
-impl SseWavelet2TapsF64 {
-    #[target_feature(enable = "sse4.2")]
+impl WasmWavelet2TapsF64 {
+    #[target_feature(enable = "simd128")]
     fn execute_inverse_impl(
         &self,
         approx: &[f64],
@@ -248,21 +248,21 @@ impl SseWavelet2TapsF64 {
                     }
                 }
 
-                let l0 = SseVectorD::load(&self.low_pass);
-                let h0 = SseVectorD::load(&self.high_pass);
+                let l0 = WasmVectorD::load(&self.low_pass);
+                let h0 = WasmVectorD::load(&self.high_pass);
 
                 let mut uq = safe_start;
                 //
                 while uq + 2 < safe_end {
                     let (h, g) = (
-                        SseVectorD::load(approx.get_unchecked(uq..)),
-                        SseVectorD::load(details.get_unchecked(uq..)),
+                        WasmVectorD::load(approx.get_unchecked(uq..)),
+                        WasmVectorD::load(details.get_unchecked(uq..)),
                     );
                     let k0 = 2 * uq as isize - FILTER_OFFSET as isize;
                     let part0_src = output.get_unchecked(k0 as usize..);
                     let part1_src = output.get_unchecked(k0 as usize + 2..);
-                    let xw0 = SseVectorD::load(part0_src);
-                    let xw1 = SseVectorD::load(part1_src);
+                    let xw0 = WasmVectorD::load(part0_src);
+                    let xw1 = WasmVectorD::load(part1_src);
                     let q0 = l0.mul_add(h.duplicate_lo(), h0.mul_add(g.duplicate_lo(), xw0));
                     let q1 = l0.mul_add(h.duplicate_hi(), h0.mul_add(g.duplicate_hi(), xw1));
                     q0.write(output.get_unchecked_mut(k0 as usize..));
@@ -272,12 +272,12 @@ impl SseWavelet2TapsF64 {
 
                 for i in uq..safe_end {
                     let (h, g) = (
-                        SseVectorD::load1(approx.get_unchecked(i..)),
-                        SseVectorD::load1(details.get_unchecked(i..)),
+                        WasmVectorD::load1(approx.get_unchecked(i..)),
+                        WasmVectorD::load1(details.get_unchecked(i..)),
                     );
                     let k = 2 * i as isize - FILTER_OFFSET as isize;
                     let part = output.get_unchecked_mut(k as usize..);
-                    let xw = SseVectorD::load(part);
+                    let xw = WasmVectorD::load(part);
                     let q = l0.mul_add(h, h0.mul_add(g, xw));
                     q.write(part);
                 }
@@ -304,19 +304,19 @@ impl SseWavelet2TapsF64 {
     }
 }
 
-impl IncompleteDwtExecutor<f64> for SseWavelet2TapsF64 {
+impl IncompleteDwtExecutor<f64> for WasmWavelet2TapsF64 {
     fn filter_length(&self) -> usize {
         2
     }
 }
 
-pub(crate) struct SseWavelet2TapsF32 {
+pub(crate) struct WasmWavelet2TapsF32 {
     border_mode: BorderMode,
     low_pass: [f32; 4],
     high_pass: [f32; 4],
 }
 
-impl SseWavelet2TapsF32 {
+impl WasmWavelet2TapsF32 {
     pub fn new(border_mode: BorderMode, wavelet: &[f32; 2]) -> Self {
         let k = low_pass_to_high_from_arr(wavelet);
         Self {
@@ -327,7 +327,7 @@ impl SseWavelet2TapsF32 {
     }
 }
 
-impl DwtForwardExecutor<f32> for SseWavelet2TapsF32 {
+impl DwtForwardExecutor<f32> for WasmWavelet2TapsF32 {
     fn execute_forward(
         &self,
         input: &[f32],
@@ -335,7 +335,7 @@ impl DwtForwardExecutor<f32> for SseWavelet2TapsF32 {
         details: &mut [f32],
     ) -> Result<(), OscletError> {
         let mut scratch = try_vec![f32::default(); self.required_scratch_size(input.len())];
-        unsafe { self.execute_forward_impl(input, approx, details, &mut scratch) }
+        self.execute_forward_impl(input, approx, details, &mut scratch)
     }
 
     fn execute_forward_with_scratch(
@@ -345,7 +345,7 @@ impl DwtForwardExecutor<f32> for SseWavelet2TapsF32 {
         details: &mut [f32],
         scratch: &mut [f32],
     ) -> Result<(), OscletError> {
-        unsafe { self.execute_forward_impl(input, approx, details, scratch) }
+        self.execute_forward_impl(input, approx, details, scratch)
     }
 
     fn required_scratch_size(&self, _: usize) -> usize {
@@ -357,8 +357,8 @@ impl DwtForwardExecutor<f32> for SseWavelet2TapsF32 {
     }
 }
 
-impl SseWavelet2TapsF32 {
-    #[target_feature(enable = "sse4.2")]
+impl WasmWavelet2TapsF32 {
+    #[target_feature(enable = "simd128")]
     fn execute_forward_impl(
         &self,
         input: &[f32],
@@ -390,8 +390,8 @@ impl SseWavelet2TapsF32 {
             details.split_at_mut(two_taps_size_for_input(input.len(), details.len()));
 
         unsafe {
-            let l0 = SseVector::load(self.low_pass.as_slice());
-            let h0 = SseVector::load(self.high_pass.as_slice());
+            let l0 = WasmVector::load(self.low_pass.as_slice());
+            let h0 = WasmVector::load(self.high_pass.as_slice());
 
             let mut processed = 0usize;
 
@@ -406,10 +406,10 @@ impl SseWavelet2TapsF32 {
 
                 let input0 = input.get_unchecked(base0..);
 
-                let xw0 = SseVector::load(input0);
-                let xw1 = SseVector::load(input0.get_unchecked(4..));
-                let xw2 = SseVector::load(input0.get_unchecked(8..));
-                let xw3 = SseVector::load(input0.get_unchecked(12..));
+                let xw0 = WasmVector::load(input0);
+                let xw1 = WasmVector::load(input0.get_unchecked(4..));
+                let xw2 = WasmVector::load(input0.get_unchecked(8..));
+                let xw3 = WasmVector::load(input0.get_unchecked(12..));
 
                 let a0 = xw0 * l0;
                 let d0 = xw0 * h0;
@@ -448,8 +448,8 @@ impl SseWavelet2TapsF32 {
                 let input0 = padded_input.get_unchecked(base0..);
                 let input1 = padded_input.get_unchecked(base0 + 4..);
 
-                let xw0 = SseVector::load(input0);
-                let xw1 = SseVector::load(input1);
+                let xw0 = WasmVector::load(input0);
+                let xw1 = WasmVector::load(input1);
 
                 let a0 = xw0 * l0;
                 let d0 = xw0 * h0;
@@ -472,7 +472,7 @@ impl SseWavelet2TapsF32 {
 
                 let input = padded_input.get_unchecked(base..);
 
-                let xw = SseVector::load2(input);
+                let xw = WasmVector::load2(input);
 
                 let a = (xw * l0).hsum();
                 let d = (xw * h0).hsum();
@@ -508,14 +508,14 @@ impl SseWavelet2TapsF32 {
     }
 }
 
-impl DwtInverseExecutor<f32> for SseWavelet2TapsF32 {
+impl DwtInverseExecutor<f32> for WasmWavelet2TapsF32 {
     fn execute_inverse(
         &self,
         approx: &[f32],
         details: &[f32],
         output: &mut [f32],
     ) -> Result<(), OscletError> {
-        unsafe { self.execute_inverse_impl(approx, details, output) }
+        self.execute_inverse_impl(approx, details, output)
     }
 
     fn idwt_size(&self, input_length: DwtSize) -> usize {
@@ -523,8 +523,8 @@ impl DwtInverseExecutor<f32> for SseWavelet2TapsF32 {
     }
 }
 
-impl SseWavelet2TapsF32 {
-    #[target_feature(enable = "sse4.2")]
+impl WasmWavelet2TapsF32 {
+    #[target_feature(enable = "simd128")]
     fn execute_inverse_impl(
         &self,
         approx: &[f32],
@@ -569,21 +569,21 @@ impl SseWavelet2TapsF32 {
                     }
                 }
 
-                let l0 = SseVector::load(self.low_pass.as_slice());
-                let h0 = SseVector::load(self.high_pass.as_slice());
+                let l0 = WasmVector::load(self.low_pass.as_slice());
+                let h0 = WasmVector::load(self.high_pass.as_slice());
 
                 let mut uq = safe_start;
 
                 while uq + 2 < safe_end {
                     let (h, g) = (
-                        SseVector::load2(approx.get_unchecked(uq..)),
-                        SseVector::load2(details.get_unchecked(uq..)),
+                        WasmVector::load2(approx.get_unchecked(uq..)),
+                        WasmVector::load2(details.get_unchecked(uq..)),
                     );
                     let fh = h.distribute_00_11();
                     let fg = g.distribute_00_11();
                     let k0 = 2 * uq as isize - FILTER_OFFSET as isize;
                     let part0_src = output.get_unchecked(k0 as usize..);
-                    let xw0 = SseVector::load(part0_src);
+                    let xw0 = WasmVector::load(part0_src);
                     let q0 = l0.mul_add(fh, h0.mul_add(fg, xw0));
                     q0.write(output.get_unchecked_mut(k0 as usize..));
                     uq += 2;
@@ -591,12 +591,12 @@ impl SseWavelet2TapsF32 {
 
                 for i in uq..safe_end {
                     let (h, g) = (
-                        SseVector::load1(approx.get_unchecked(i..)),
-                        SseVector::load1(details.get_unchecked(i..)),
+                        WasmVector::load1(approx.get_unchecked(i..)),
+                        WasmVector::load1(details.get_unchecked(i..)),
                     );
                     let k = 2 * i as isize - FILTER_OFFSET as isize;
                     let part = output.get_unchecked_mut(k as usize..);
-                    let xw = SseVector::load2(part);
+                    let xw = WasmVector::load2(part);
                     let q = l0.mul_add(h, h0.mul_add(g, xw));
                     q.write2(part);
                 }
@@ -623,7 +623,7 @@ impl SseWavelet2TapsF32 {
     }
 }
 
-impl IncompleteDwtExecutor<f32> for SseWavelet2TapsF32 {
+impl IncompleteDwtExecutor<f32> for WasmWavelet2TapsF32 {
     fn filter_length(&self) -> usize {
         2
     }
@@ -632,18 +632,15 @@ impl IncompleteDwtExecutor<f32> for SseWavelet2TapsF32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::factory::has_valid_sse;
     use crate::{DaubechiesFamily, WaveletFilterProvider};
+    use wasm_bindgen_test::wasm_bindgen_test;
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_db1_odd() {
-        if !has_valid_sse() {
-            return;
-        }
         let input = vec![
             1.0, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3, 2.5,
         ];
-        let db1 = SseWavelet2TapsF64::new(
+        let db1 = WasmWavelet2TapsF64::new(
             BorderMode::Wrap,
             DaubechiesFamily::Db1
                 .get_wavelet()
@@ -718,15 +715,12 @@ mod tests {
         });
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_db1_even() {
-        if !has_valid_sse() {
-            return;
-        }
         let input = vec![
             1.0, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3,
         ];
-        let db1 = SseWavelet2TapsF64::new(
+        let db1 = WasmWavelet2TapsF64::new(
             BorderMode::Wrap,
             DaubechiesFamily::Db1
                 .get_wavelet()
@@ -785,15 +779,12 @@ mod tests {
         });
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_db1_odd_f32() {
-        if !has_valid_sse() {
-            return;
-        }
         let input = vec![
             1.0, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3, 2.5,
         ];
-        let db1 = SseWavelet2TapsF32::new(
+        let db1 = WasmWavelet2TapsF32::new(
             BorderMode::Wrap,
             DaubechiesFamily::Db1
                 .get_wavelet()
@@ -867,15 +858,12 @@ mod tests {
         });
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_db1_even_f32() {
-        if !has_valid_sse() {
-            return;
-        }
         let input = vec![
             1.0, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3,
         ];
-        let db1 = SseWavelet2TapsF32::new(
+        let db1 = WasmWavelet2TapsF32::new(
             BorderMode::Wrap,
             DaubechiesFamily::Db1
                 .get_wavelet()
@@ -934,16 +922,13 @@ mod tests {
         });
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn test_db1_even_f32_2() {
-        if !has_valid_sse() {
-            return;
-        }
         let input = vec![
             1.0, 2.0, 3.0, 4.0, 2.0, 1.0, 0.0, 1.0, 2.4, 6.5, 2.4, 6.4, 5.2, 0.6, 0.5, 1.3, 2.0,
             1.0,
         ];
-        let db1 = SseWavelet2TapsF32::new(
+        let db1 = WasmWavelet2TapsF32::new(
             BorderMode::Wrap,
             DaubechiesFamily::Db1
                 .get_wavelet()

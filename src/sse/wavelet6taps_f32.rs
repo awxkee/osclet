@@ -29,16 +29,9 @@
 use crate::border_mode::{BorderInterpolation, BorderMode};
 use crate::err::{OscletError, try_vec};
 use crate::mla::fmla;
-use crate::sse::util::{
-    _mm_fma_ps, _mm_hsum_ps, _mm_load2_ps, _mm_swap_hilo, _mm_unpack2hi_ps, _mm_unpack2lo_ps,
-    shuffle,
-};
+use crate::sse::sse_vector::SseVector;
 use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr, sixth_taps_size_for_input};
 use crate::{DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor};
-#[cfg(target_arch = "x86")]
-use std::arch::x86::*;
-#[cfg(target_arch = "x86_64")]
-use std::arch::x86_64::*;
 
 pub(crate) struct SseWavelet6TapsF32 {
     border_mode: BorderMode,
@@ -117,10 +110,10 @@ impl SseWavelet6TapsF32 {
         }
 
         unsafe {
-            let h = _mm_loadu_ps(self.low_pass.as_ptr());
-            let h2 = _mm_loadu_ps(self.low_pass.get_unchecked(4..).as_ptr());
-            let g = _mm_loadu_ps(self.high_pass.as_ptr());
-            let g2 = _mm_loadu_ps(self.high_pass.get_unchecked(4..).as_ptr());
+            let h = SseVector::load(self.low_pass.as_slice());
+            let h2 = SseVector::load(&self.low_pass[4..]);
+            let g = SseVector::load(self.high_pass.as_slice());
+            let g2 = SseVector::load(&self.high_pass[4..]);
 
             let interpolation = BorderInterpolation::new(self.border_mode, 0, input.len() as isize);
 
@@ -141,17 +134,17 @@ impl SseWavelet6TapsF32 {
                 let x4 = *input.get_unchecked((base + 4) as usize);
                 let x5 = *input.get_unchecked((base + 5) as usize);
 
-                let xw = _mm_setr_ps(x0, x1, x2, x3);
-                let xw1 = _mm_setr_ps(x4, x5, 0., 0.);
+                let xw = SseVector::from_elements(x0, x1, x2, x3);
+                let xw1 = SseVector::from_elements(x4, x5, 0., 0.);
 
-                let a = _mm_fma_ps(xw1, h2, _mm_mul_ps(xw, h));
-                let d = _mm_fma_ps(xw1, g2, _mm_mul_ps(xw, g));
+                let a = xw1.mul_add(h2, xw * h);
+                let d = xw1.mul_add(g2, xw * g);
 
-                let a0 = _mm_hsum_ps(a);
-                let d0 = _mm_hsum_ps(d);
+                let a0 = a.hsum();
+                let d0 = d.hsum();
 
-                _mm_store_ss(approx, a0);
-                _mm_store_ss(detail, d0);
+                a0.write1(approx);
+                d0.write1(detail);
             }
 
             let (approx, approx_rem) =
@@ -174,35 +167,35 @@ impl SseWavelet6TapsF32 {
 
                 let input0 = input.get_unchecked(base0..);
 
-                let xw01 = _mm_loadu_ps(input0.as_ptr());
-                let xw23 = _mm_loadu_ps(input0.get_unchecked(4..).as_ptr());
-                let xw45 = _mm_loadu_ps(input0.get_unchecked(8..).as_ptr());
+                let xw01 = SseVector::load(input0);
+                let xw23 = SseVector::load(input0.get_unchecked(4..));
+                let xw45 = SseVector::load(input0.get_unchecked(8..));
 
-                let xw0002 = _mm_unpack2lo_ps(xw23, _mm_setzero_ps());
-                let xw0003 = _mm_unpack2hi_ps(xw23, _mm_setzero_ps());
-                let xw0004 = _mm_unpack2lo_ps(xw45, _mm_setzero_ps());
-                let xw0005 = _mm_unpack2hi_ps(xw45, _mm_setzero_ps());
+                let xw0002 = xw23.unpack2_lo(SseVector::zero());
+                let xw0003 = xw23.unpack2_hi(SseVector::zero());
+                let xw0004 = xw45.unpack2_lo(SseVector::zero());
+                let xw0005 = xw45.unpack2_hi(SseVector::zero());
 
-                let xw1 = _mm_swap_hilo(xw01, xw23);
-                let xw2 = _mm_swap_hilo(xw23, xw45);
+                let xw1 = xw01.swap_hilo(xw23);
+                let xw2 = xw23.swap_hilo(xw45);
 
-                let a0 = _mm_fma_ps(xw0002, h2, _mm_mul_ps(xw01, h));
-                let d0 = _mm_fma_ps(xw0002, g2, _mm_mul_ps(xw01, g));
+                let a0 = xw0002.mul_add(h2, xw01 * h);
+                let d0 = xw0002.mul_add(g2, xw01 * g);
 
-                let a1 = _mm_fma_ps(xw0003, h2, _mm_mul_ps(xw1, h));
-                let d1 = _mm_fma_ps(xw0003, g2, _mm_mul_ps(xw1, g));
+                let a1 = xw0003.mul_add(h2, xw1 * h);
+                let d1 = xw0003.mul_add(g2, xw1 * g);
 
-                let a2 = _mm_fma_ps(xw0004, h2, _mm_mul_ps(xw23, h));
-                let d2 = _mm_fma_ps(xw0004, g2, _mm_mul_ps(xw23, g));
+                let a2 = xw0004.mul_add(h2, xw23 * h);
+                let d2 = xw0004.mul_add(g2, xw23 * g);
 
-                let a3 = _mm_fma_ps(xw0005, h2, _mm_mul_ps(xw2, h));
-                let d3 = _mm_fma_ps(xw0005, g2, _mm_mul_ps(xw2, g));
+                let a3 = xw0005.mul_add(h2, xw2 * h);
+                let d3 = xw0005.mul_add(g2, xw2 * g);
 
-                let wa = _mm_hadd_ps(_mm_hadd_ps(a0, a1), _mm_hadd_ps(a2, a3));
-                let wd = _mm_hadd_ps(_mm_hadd_ps(d0, d1), _mm_hadd_ps(d2, d3));
+                let wa = a0.hadd(a1).hadd(a2.hadd(a3));
+                let wd = d0.hadd(d1).hadd(d2.hadd(d3));
 
-                _mm_storeu_ps(approx.as_mut_ptr(), wa);
-                _mm_storeu_ps(detail.as_mut_ptr(), wd);
+                wa.write(approx);
+                wd.write(detail);
 
                 processed += 4;
             }
@@ -214,17 +207,17 @@ impl SseWavelet6TapsF32 {
                 let base = 2 * (i + processed);
                 let input = input.get_unchecked(base..);
 
-                let xw = _mm_loadu_ps(input.as_ptr());
-                let xw1 = _mm_load2_ps(input.get_unchecked(4..).as_ptr());
+                let xw = SseVector::load(input);
+                let xw1 = SseVector::load2(input.get_unchecked(4..));
 
-                let a = _mm_fma_ps(xw1, h2, _mm_mul_ps(xw, h));
-                let d = _mm_fma_ps(xw1, g2, _mm_mul_ps(xw, g));
+                let a = xw1.mul_add(h2, xw * h);
+                let d = xw1.mul_add(g2, xw * g);
 
-                let a0 = _mm_hsum_ps(a);
-                let d0 = _mm_hsum_ps(d);
+                let a0 = a.hsum();
+                let d0 = d.hsum();
 
-                _mm_store_ss(approx, a0);
-                _mm_store_ss(detail, d0);
+                a0.write1(approx);
+                d0.write1(detail);
             }
 
             for (i, (approx, detail)) in approx_rem
@@ -241,17 +234,17 @@ impl SseWavelet6TapsF32 {
                 let x4 = interpolation.interpolate(input, base as isize + 4);
                 let x5 = interpolation.interpolate(input, base as isize + 5);
 
-                let xw = _mm_setr_ps(x0, x1, x2, x3);
-                let xw1 = _mm_setr_ps(x4, x5, 0., 0.);
+                let xw = SseVector::from_elements(x0, x1, x2, x3);
+                let xw1 = SseVector::from_elements(x4, x5, 0., 0.);
 
-                let a = _mm_fma_ps(xw1, h2, _mm_mul_ps(xw, h));
-                let d = _mm_fma_ps(xw1, g2, _mm_mul_ps(xw, g));
+                let a = xw1.mul_add(h2, xw * h);
+                let d = xw1.mul_add(g2, xw * g);
 
-                let a0 = _mm_hsum_ps(a);
-                let d0 = _mm_hsum_ps(d);
+                let a0 = a.hsum();
+                let d0 = d.hsum();
 
-                _mm_store_ss(approx, a0);
-                _mm_store_ss(detail, d0);
+                a0.write1(approx);
+                d0.write1(detail);
             }
         }
         Ok(())
@@ -319,69 +312,59 @@ impl SseWavelet6TapsF32 {
                     }
                 }
 
-                let h0 = _mm_loadu_ps(self.low_pass.as_ptr());
-                let h2 = _mm_loadu_ps(self.low_pass.get_unchecked(4..).as_ptr());
-                let g0 = _mm_loadu_ps(self.high_pass.as_ptr());
-                let g2 = _mm_loadu_ps(self.high_pass.get_unchecked(4..).as_ptr());
+                let h0 = SseVector::load(self.low_pass.as_slice());
+                let h2 = SseVector::load(&self.low_pass[4..]);
+                let g0 = SseVector::load(self.high_pass.as_slice());
+                let g2 = SseVector::load(&self.high_pass[4..]);
 
                 let mut ui = safe_start;
 
                 while ui + 2 < safe_end {
                     let (h, g) = (
-                        _mm_load2_ps(approx.get_unchecked(ui)),
-                        _mm_load2_ps(details.get_unchecked(ui)),
+                        SseVector::load2(approx.get_unchecked(ui..)),
+                        SseVector::load2(details.get_unchecked(ui..)),
                     );
                     let k = 2 * ui as isize - FILTER_OFFSET as isize;
                     let part0 = output.get_unchecked_mut(k as usize..);
-                    let q0 = _mm_loadu_ps(part0.as_ptr());
-                    let q1 = _mm_loadu_ps(part0.get_unchecked(4..).as_ptr());
+                    let q0 = SseVector::load(part0);
+                    let q1 = SseVector::load(part0.get_unchecked(4..));
 
-                    let wg0 = _mm_shuffle_ps::<{ shuffle(0, 0, 0, 0) }>(g, g);
-                    let wh0 = _mm_shuffle_ps::<{ shuffle(0, 0, 0, 0) }>(h, h);
+                    let wg0 = g.distribute_element::<0>();
+                    let wh0 = h.distribute_element::<0>();
 
-                    let w0 = _mm_fma_ps(g0, wg0, _mm_fma_ps(wh0, h0, q0));
-                    let w1 = _mm_fma_ps(g2, wg0, _mm_fma_ps(wh0, h2, q1));
+                    let w0 = g0.mul_add(wg0, wh0.mul_add(h0, q0));
+                    let w1 = g2.mul_add(wg0, wh0.mul_add(h2, q1));
 
-                    let interim_w = _mm_swap_hilo(w0, w1);
+                    let interim_w = w0.swap_hilo(w1);
 
-                    let wg1 = _mm_shuffle_ps::<{ shuffle(1, 1, 1, 1) }>(g, g);
-                    let wh1 = _mm_shuffle_ps::<{ shuffle(1, 1, 1, 1) }>(h, h);
+                    let wg1 = g.distribute_element::<1>();
+                    let wh1 = h.distribute_element::<1>();
 
-                    let w3 = _mm_fma_ps(g0, wg1, _mm_fma_ps(h0, wh1, interim_w));
-                    let w4 = _mm_fma_ps(
-                        g2,
-                        wg1,
-                        _mm_fma_ps(h2, wh1, _mm_swap_hilo(q1, _mm_setzero_ps())),
-                    );
+                    let w3 = g0.mul_add(wg1, h0.mul_add(wh1, interim_w));
+                    let w4 = g2.mul_add(wg1, h2.mul_add(wh1, q1.swap_hilo(SseVector::zero())));
 
-                    _mm_storel_pd(part0.as_mut_ptr().cast(), _mm_castps_pd(w0));
-                    _mm_storeu_ps(part0.get_unchecked_mut(2..).as_mut_ptr(), w3);
-                    _mm_storel_pd(
-                        part0.get_unchecked_mut(6..).as_mut_ptr().cast(),
-                        _mm_castps_pd(w4),
-                    );
+                    w0.write2(part0);
+                    w3.write(part0.get_unchecked_mut(2..));
+                    w4.write2(part0.get_unchecked_mut(6..));
                     ui += 2;
                 }
 
                 for i in ui..safe_end {
                     let (h, g) = (
-                        _mm_load1_ps(approx.get_unchecked(i)),
-                        _mm_load1_ps(details.get_unchecked(i)),
+                        SseVector::load1(approx.get_unchecked(i..)),
+                        SseVector::load1(details.get_unchecked(i..)),
                     );
                     let k = 2 * i as isize - FILTER_OFFSET as isize;
                     let part = output.get_unchecked_mut(k as usize..);
 
-                    let xw0 = _mm_loadu_ps(part.as_ptr());
-                    let xw1 = _mm_load2_ps(part.get_unchecked(4..).as_ptr());
+                    let xw0 = SseVector::load(part);
+                    let xw1 = SseVector::load2(part.get_unchecked(4..));
 
-                    let q0 = _mm_fma_ps(g0, g, _mm_fma_ps(h0, h, xw0));
-                    let q2 = _mm_fma_ps(g2, g, _mm_fma_ps(h2, h, xw1));
+                    let q0 = g0.mul_add(g, h0.mul_add(h, xw0));
+                    let q2 = g2.mul_add(g, h2.mul_add(h, xw1));
 
-                    _mm_storeu_ps(part.as_mut_ptr(), q0);
-                    _mm_storel_pd(
-                        part.get_unchecked_mut(4..).as_mut_ptr().cast(),
-                        _mm_castps_pd(q2),
-                    );
+                    q0.write(part);
+                    q2.write2(part.get_unchecked_mut(4..));
                 }
             } else {
                 safe_end = 0usize;

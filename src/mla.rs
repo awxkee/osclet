@@ -58,5 +58,5 @@ pub(crate) fn fmla<T: Copy + Mul<T, Output = T> + Add<T, Output = T> + MulAdd<T,
     b: T,
     c: T,
 ) -> T {
-    MulAdd::mul_add(a, b, c)
+    a * b + c
 }

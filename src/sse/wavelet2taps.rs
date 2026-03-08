@@ -26,18 +26,13 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-use crate::err::{OscletError, try_vec};
+use crate::err::{try_vec, OscletError};
 use crate::mla::fmla;
-use crate::sse::util::{
-    _mm_fma_pd, _mm_fma_ps, _mm_hsum_pd, _mm_hsum_ps, _mm_load2_ps, _mm_store2_ps, shuffle,
-};
+use crate::sse::sse_vector::SseVector;
+use crate::sse::sse_vector_d::SseVectorD;
 use crate::util::{dwt_length, idwt_length, low_pass_to_high_from_arr, two_taps_size_for_input};
 use crate::{BorderMode, DwtForwardExecutor, DwtInverseExecutor, DwtSize, IncompleteDwtExecutor};
 use num_traits::AsPrimitive;
-#[cfg(target_arch = "x86")]
-use std::arch::x86::*;
-#[cfg(target_arch = "x86_64")]
-use std::arch::x86_64::*;
 
 pub(crate) struct SseWavelet2TapsF64 {
     border_mode: BorderMode,
@@ -118,8 +113,8 @@ impl SseWavelet2TapsF64 {
             details.split_at_mut(two_taps_size_for_input(input.len(), details.len()));
 
         unsafe {
-            let l0 = _mm_loadu_pd(self.low_pass.as_ptr());
-            let h0 = _mm_loadu_pd(self.high_pass.as_ptr());
+            let l0 = SseVectorD::load(&self.low_pass);
+            let h0 = SseVectorD::load(&self.high_pass);
 
             for (i, (approx, detail)) in approx
                 .as_chunks_mut::<2>()
@@ -133,17 +128,17 @@ impl SseWavelet2TapsF64 {
                 let input0 = input.get_unchecked(base0..);
                 let input1 = input.get_unchecked(base0 + 2..);
 
-                let xw0 = _mm_loadu_pd(input0.as_ptr());
-                let xw1 = _mm_loadu_pd(input1.as_ptr());
+                let xw0 = SseVectorD::load(input0);
+                let xw1 = SseVectorD::load(input1);
 
-                let a0 = _mm_mul_pd(xw0, l0);
-                let d0 = _mm_mul_pd(xw0, h0);
+                let a0 = xw0 * l0;
+                let d0 = xw0 * h0;
 
-                let a1 = _mm_mul_pd(xw1, l0);
-                let d1 = _mm_mul_pd(xw1, h0);
+                let a1 = xw1 * l0;
+                let d1 = xw1 * h0;
 
-                _mm_storeu_pd(approx.as_mut_ptr(), _mm_hadd_pd(a0, a1));
-                _mm_storeu_pd(detail.as_mut_ptr(), _mm_hadd_pd(d0, d1));
+                a0.hadd(a1).write(approx);
+                d0.hadd(d1).write(detail);
             }
 
             let processed = 2 * approx.chunks_exact_mut(2).len() * 2;
@@ -156,13 +151,13 @@ impl SseWavelet2TapsF64 {
 
                 let input = input.get_unchecked(base..);
 
-                let xw = _mm_loadu_pd(input.as_ptr());
+                let xw = SseVectorD::load(input);
 
-                let a = _mm_hsum_pd(_mm_mul_pd(xw, l0));
-                let d = _mm_hsum_pd(_mm_mul_pd(xw, h0));
+                let a = (xw * l0).hsum();
+                let d = (xw * h0).hsum();
 
-                _mm_store_sd(approx, a);
-                _mm_store_sd(detail, d);
+                a.write1(approx);
+                d.write1(detail);
             }
 
             if !details_rem.is_empty() && !approx_rem.is_empty() {
@@ -253,46 +248,38 @@ impl SseWavelet2TapsF64 {
                     }
                 }
 
-                let l0 = _mm_loadu_pd(self.low_pass.as_ptr());
-                let h0 = _mm_loadu_pd(self.high_pass.as_ptr());
+                let l0 = SseVectorD::load(&self.low_pass);
+                let h0 = SseVectorD::load(&self.high_pass);
 
                 let mut uq = safe_start;
                 //
                 while uq + 2 < safe_end {
                     let (h, g) = (
-                        _mm_loadu_pd(approx.get_unchecked(uq..).as_ptr()),
-                        _mm_loadu_pd(details.get_unchecked(uq..).as_ptr()),
+                        SseVectorD::load(approx.get_unchecked(uq..)),
+                        SseVectorD::load(details.get_unchecked(uq..)),
                     );
                     let k0 = 2 * uq as isize - FILTER_OFFSET as isize;
                     let part0_src = output.get_unchecked(k0 as usize..);
                     let part1_src = output.get_unchecked(k0 as usize + 2..);
-                    let xw0 = _mm_loadu_pd(part0_src.as_ptr());
-                    let xw1 = _mm_loadu_pd(part1_src.as_ptr());
-                    let q0 = _mm_fma_pd(
-                        l0,
-                        _mm_shuffle_pd::<0>(h, h),
-                        _mm_fma_pd(h0, _mm_shuffle_pd::<0>(g, g), xw0),
-                    );
-                    let q1 = _mm_fma_pd(
-                        l0,
-                        _mm_shuffle_pd::<0b11>(h, h),
-                        _mm_fma_pd(h0, _mm_shuffle_pd::<0b11>(g, g), xw1),
-                    );
-                    _mm_storeu_pd(output.get_unchecked_mut(k0 as usize..).as_mut_ptr(), q0);
-                    _mm_storeu_pd(output.get_unchecked_mut(k0 as usize + 2..).as_mut_ptr(), q1);
+                    let xw0 = SseVectorD::load(part0_src);
+                    let xw1 = SseVectorD::load(part1_src);
+                    let q0 = l0.mul_add(h.duplicate_lo(), h0.mul_add(g.duplicate_lo(), xw0));
+                    let q1 = l0.mul_add(h.duplicate_hi(), h0.mul_add(g.duplicate_hi(), xw1));
+                    q0.write(output.get_unchecked_mut(k0 as usize..));
+                    q1.write(output.get_unchecked_mut(k0 as usize + 2..));
                     uq += 2;
                 }
 
                 for i in uq..safe_end {
                     let (h, g) = (
-                        _mm_load1_pd(approx.get_unchecked(i)),
-                        _mm_load1_pd(details.get_unchecked(i)),
+                        SseVectorD::load1(approx.get_unchecked(i..)),
+                        SseVectorD::load1(details.get_unchecked(i..)),
                     );
                     let k = 2 * i as isize - FILTER_OFFSET as isize;
                     let part = output.get_unchecked_mut(k as usize..);
-                    let xw = _mm_loadu_pd(part.as_ptr());
-                    let q = _mm_fma_pd(l0, h, _mm_fma_pd(h0, g, xw));
-                    _mm_storeu_pd(part.as_mut_ptr(), q);
+                    let xw = SseVectorD::load(part);
+                    let q = l0.mul_add(h, h0.mul_add(g, xw));
+                    q.write(part);
                 }
             } else {
                 safe_end = 0usize;
@@ -403,8 +390,8 @@ impl SseWavelet2TapsF32 {
             details.split_at_mut(two_taps_size_for_input(input.len(), details.len()));
 
         unsafe {
-            let l0 = _mm_loadu_ps(self.low_pass.as_ptr());
-            let h0 = _mm_loadu_ps(self.high_pass.as_ptr());
+            let l0 = SseVector::load(self.low_pass.as_slice());
+            let h0 = SseVector::load(self.high_pass.as_slice());
 
             let mut processed = 0usize;
 
@@ -419,33 +406,27 @@ impl SseWavelet2TapsF32 {
 
                 let input0 = input.get_unchecked(base0..);
 
-                let xw0 = _mm_loadu_ps(input0.as_ptr());
-                let xw1 = _mm_loadu_ps(input0.get_unchecked(4..).as_ptr());
-                let xw2 = _mm_loadu_ps(input0.get_unchecked(8..).as_ptr());
-                let xw3 = _mm_loadu_ps(input0.get_unchecked(12..).as_ptr());
+                let xw0 = SseVector::load(input0);
+                let xw1 = SseVector::load(input0.get_unchecked(4..));
+                let xw2 = SseVector::load(input0.get_unchecked(8..));
+                let xw3 = SseVector::load(input0.get_unchecked(12..));
 
-                let a0 = _mm_mul_ps(xw0, l0);
-                let d0 = _mm_mul_ps(xw0, h0);
+                let a0 = xw0 * l0;
+                let d0 = xw0 * h0;
 
-                let a1 = _mm_mul_ps(xw1, l0);
-                let d1 = _mm_mul_ps(xw1, h0);
+                let a1 = xw1 * l0;
+                let d1 = xw1 * h0;
 
-                let a2 = _mm_mul_ps(xw2, l0);
-                let d2 = _mm_mul_ps(xw2, h0);
+                let a2 = xw2 * l0;
+                let d2 = xw2 * h0;
 
-                let a3 = _mm_mul_ps(xw3, l0);
-                let d3 = _mm_mul_ps(xw3, h0);
+                let a3 = xw3 * l0;
+                let d3 = xw3 * h0;
 
-                _mm_storeu_ps(approx.as_mut_ptr(), _mm_hadd_ps(a0, a1));
-                _mm_storeu_ps(detail.as_mut_ptr(), _mm_hadd_ps(d0, d1));
-                _mm_storeu_ps(
-                    approx.get_unchecked_mut(4..).as_mut_ptr(),
-                    _mm_hadd_ps(a2, a3),
-                );
-                _mm_storeu_ps(
-                    detail.get_unchecked_mut(4..).as_mut_ptr(),
-                    _mm_hadd_ps(d2, d3),
-                );
+                a0.hadd(a1).write(approx);
+                d0.hadd(d1).write(detail);
+                a2.hadd(a3).write(approx.get_unchecked_mut(4..));
+                d2.hadd(d3).write(detail.get_unchecked_mut(4..));
 
                 processed += 8;
             }
@@ -467,17 +448,17 @@ impl SseWavelet2TapsF32 {
                 let input0 = padded_input.get_unchecked(base0..);
                 let input1 = padded_input.get_unchecked(base0 + 4..);
 
-                let xw0 = _mm_loadu_ps(input0.as_ptr());
-                let xw1 = _mm_loadu_ps(input1.as_ptr());
+                let xw0 = SseVector::load(input0);
+                let xw1 = SseVector::load(input1);
 
-                let a0 = _mm_mul_ps(xw0, l0);
-                let d0 = _mm_mul_ps(xw0, h0);
+                let a0 = xw0 * l0;
+                let d0 = xw0 * h0;
 
-                let a1 = _mm_mul_ps(xw1, l0);
-                let d1 = _mm_mul_ps(xw1, h0);
+                let a1 = xw1 * l0;
+                let d1 = xw1 * h0;
 
-                _mm_storeu_ps(approx.as_mut_ptr(), _mm_hadd_ps(a0, a1));
-                _mm_storeu_ps(detail.as_mut_ptr(), _mm_hadd_ps(d0, d1));
+                a0.hadd(a1).write(approx);
+                d0.hadd(d1).write(detail);
 
                 processed += 4;
             }
@@ -491,13 +472,13 @@ impl SseWavelet2TapsF32 {
 
                 let input = padded_input.get_unchecked(base..);
 
-                let xw = _mm_load2_ps(input.as_ptr());
+                let xw = SseVector::load2(input);
 
-                let a = _mm_hsum_ps(_mm_mul_ps(xw, l0));
-                let d = _mm_hsum_ps(_mm_mul_ps(xw, h0));
+                let a = (xw * l0).hsum();
+                let d = (xw * h0).hsum();
 
-                _mm_store_ss(approx, a);
-                _mm_store_ss(detail, d);
+                a.write1(approx);
+                d.write1(detail);
             }
 
             if !details_rem.is_empty() && !approx_rem.is_empty() {
@@ -588,36 +569,36 @@ impl SseWavelet2TapsF32 {
                     }
                 }
 
-                let l0 = _mm_loadu_ps(self.low_pass.as_ptr());
-                let h0 = _mm_loadu_ps(self.high_pass.as_ptr());
+                let l0 = SseVector::load(self.low_pass.as_slice());
+                let h0 = SseVector::load(self.high_pass.as_slice());
 
                 let mut uq = safe_start;
 
                 while uq + 2 < safe_end {
                     let (h, g) = (
-                        _mm_load2_ps(approx.get_unchecked(uq..).as_ptr()),
-                        _mm_load2_ps(details.get_unchecked(uq..).as_ptr()),
+                        SseVector::load2(approx.get_unchecked(uq..)),
+                        SseVector::load2(details.get_unchecked(uq..)),
                     );
-                    let fh = _mm_shuffle_ps::<{ shuffle(1, 1, 0, 0) }>(h, h);
-                    let fg = _mm_shuffle_ps::<{ shuffle(1, 1, 0, 0) }>(g, g);
+                    let fh = h.distribute_00_11();
+                    let fg = g.distribute_00_11();
                     let k0 = 2 * uq as isize - FILTER_OFFSET as isize;
                     let part0_src = output.get_unchecked(k0 as usize..);
-                    let xw0 = _mm_loadu_ps(part0_src.as_ptr());
-                    let q0 = _mm_fma_ps(l0, fh, _mm_fma_ps(h0, fg, xw0));
-                    _mm_storeu_ps(output.get_unchecked_mut(k0 as usize..).as_mut_ptr(), q0);
+                    let xw0 = SseVector::load(part0_src);
+                    let q0 = l0.mul_add(fh, h0.mul_add(fg, xw0));
+                    q0.write(output.get_unchecked_mut(k0 as usize..));
                     uq += 2;
                 }
 
                 for i in uq..safe_end {
                     let (h, g) = (
-                        _mm_load1_ps(approx.get_unchecked(i)),
-                        _mm_load1_ps(details.get_unchecked(i)),
+                        SseVector::load1(approx.get_unchecked(i..)),
+                        SseVector::load1(details.get_unchecked(i..)),
                     );
                     let k = 2 * i as isize - FILTER_OFFSET as isize;
                     let part = output.get_unchecked_mut(k as usize..);
-                    let xw = _mm_load2_ps(part.as_ptr());
-                    let q = _mm_fma_ps(l0, h, _mm_fma_ps(h0, g, xw));
-                    _mm_store2_ps(part.as_mut_ptr(), q);
+                    let xw = SseVector::load2(part);
+                    let q = l0.mul_add(h, h0.mul_add(g, xw));
+                    q.write2(part);
                 }
             } else {
                 safe_end = 0usize;

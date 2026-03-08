@@ -28,6 +28,7 @@
  */
 mod convolve1d_f32;
 mod convolve1d_f64;
+mod sse_vector;
 mod util;
 mod wavelet10taps_f32;
 mod wavelet10taps_f64;
@@ -42,6 +43,7 @@ mod wavelet8taps_f32;
 mod wavelet8taps_f64;
 mod wavelet_n_taps_f32;
 mod wavelet_n_taps_f64;
+mod sse_vector_d;
 
 pub(crate) use convolve1d_f32::SseConvolution1dF32;
 pub(crate) use convolve1d_f64::SseConvolution1dF64;

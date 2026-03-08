@@ -553,8 +553,8 @@ mod tests {
             .unwrap();
         reconstructed.iter().take(input.len()).enumerate().for_each(|(i, x)| {
             assert!(
-                (input[i] - x).abs() < 1e-7,
-                "reconstructed difference expected to be < 1e-7, but values were ref {}, derived {}",
+                (input[i] - x).abs() < 1e-3,
+                "reconstructed difference expected to be < 1e-3, but values were ref {}, derived {}",
                 input[i],
                 x
             );

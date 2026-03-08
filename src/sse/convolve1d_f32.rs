@@ -31,11 +31,7 @@ use crate::convolve1d::{Convolve1d, ConvolvePaddings};
 use crate::err::OscletError;
 use crate::filter_padding::write_arena_1d;
 use crate::mla::fmla;
-use crate::sse::util::{_mm_fma_ps, shuffle};
-#[cfg(target_arch = "x86")]
-use std::arch::x86::*;
-#[cfg(target_arch = "x86_64")]
-use std::arch::x86_64::*;
+use crate::sse::sse_vector::SseVector;
 use std::ops::Mul;
 
 pub(crate) struct SseConvolution1dF32 {
@@ -114,7 +110,7 @@ impl SseConvolution1dF32 {
         )?;
 
         unsafe {
-            let c0 = _mm_set1_ps(*kernel.get_unchecked(0));
+            let c0 = SseVector::dup(*kernel.get_unchecked(0));
 
             let mut p = output.chunks_exact_mut(16).len() * 16;
 
@@ -122,38 +118,25 @@ impl SseConvolution1dF32 {
                 let zx = x * 16;
                 let shifted_src = arena.get_unchecked(zx..);
 
-                let mut k0 = _mm_mul_ps(_mm_loadu_ps(shifted_src.as_ptr()), c0);
-                let mut k1 = _mm_mul_ps(_mm_loadu_ps(shifted_src.get_unchecked(4..).as_ptr()), c0);
-                let mut k2 = _mm_mul_ps(_mm_loadu_ps(shifted_src.get_unchecked(8..).as_ptr()), c0);
-                let mut k3 = _mm_mul_ps(_mm_loadu_ps(shifted_src.get_unchecked(12..).as_ptr()), c0);
+                let mut k0 = SseVector::load(shifted_src) * c0;
+                let mut k1 = SseVector::load(shifted_src.get_unchecked(4..)) * c0;
+                let mut k2 = SseVector::load(shifted_src.get_unchecked(8..)) * c0;
+                let mut k3 = SseVector::load(shifted_src.get_unchecked(12..)) * c0;
 
                 let mut f = 1usize;
 
                 while f + 4 < filter_size {
-                    let coeff = _mm_loadu_ps(kernel.get_unchecked(f..).as_ptr());
+                    let coeff = SseVector::load(kernel.get_unchecked(f..));
                     macro_rules! step {
                         ($i: expr, $k: expr) => {
-                            let c = _mm_shuffle_ps::<{ shuffle($k, $k, $k, $k) }>(coeff, coeff);
-                            k0 = _mm_fma_ps(
-                                _mm_loadu_ps(shifted_src.get_unchecked($i..).as_ptr()),
-                                c,
-                                k0,
-                            );
-                            k1 = _mm_fma_ps(
-                                _mm_loadu_ps(shifted_src.get_unchecked($i + 4..).as_ptr()),
-                                c,
-                                k1,
-                            );
-                            k2 = _mm_fma_ps(
-                                _mm_loadu_ps(shifted_src.get_unchecked($i + 8..).as_ptr()),
-                                c,
-                                k2,
-                            );
-                            k3 = _mm_fma_ps(
-                                _mm_loadu_ps(shifted_src.get_unchecked($i + 12..).as_ptr()),
-                                c,
-                                k3,
-                            );
+                            let c = coeff.distribute_element::<$k>();
+                            k0 = SseVector::load(shifted_src.get_unchecked($i..)).mul_add(c, k0);
+                            k1 =
+                                SseVector::load(shifted_src.get_unchecked($i + 4..)).mul_add(c, k1);
+                            k2 =
+                                SseVector::load(shifted_src.get_unchecked($i + 8..)).mul_add(c, k2);
+                            k3 = SseVector::load(shifted_src.get_unchecked($i + 12..))
+                                .mul_add(c, k3);
                         };
                     }
                     step!(f, 0);
@@ -164,33 +147,17 @@ impl SseConvolution1dF32 {
                 }
 
                 for i in f..filter_size {
-                    let coeff = _mm_load1_ps(kernel.get_unchecked(i));
-                    k0 = _mm_fma_ps(
-                        _mm_loadu_ps(shifted_src.get_unchecked(i..).as_ptr()),
-                        coeff,
-                        k0,
-                    );
-                    k1 = _mm_fma_ps(
-                        _mm_loadu_ps(shifted_src.get_unchecked(i + 4..).as_ptr()),
-                        coeff,
-                        k1,
-                    );
-                    k2 = _mm_fma_ps(
-                        _mm_loadu_ps(shifted_src.get_unchecked(i + 8..).as_ptr()),
-                        coeff,
-                        k2,
-                    );
-                    k3 = _mm_fma_ps(
-                        _mm_loadu_ps(shifted_src.get_unchecked(i + 12..).as_ptr()),
-                        coeff,
-                        k3,
-                    );
+                    let coeff = SseVector::load1(kernel.get_unchecked(i..));
+                    k0 = SseVector::load(shifted_src.get_unchecked(i..)).mul_add(coeff, k0);
+                    k1 = SseVector::load(shifted_src.get_unchecked(i + 4..)).mul_add(coeff, k1);
+                    k2 = SseVector::load(shifted_src.get_unchecked(i + 8..)).mul_add(coeff, k2);
+                    k3 = SseVector::load(shifted_src.get_unchecked(i + 12..)).mul_add(coeff, k3);
                 }
 
-                _mm_storeu_ps(dst.as_mut_ptr(), k0);
-                _mm_storeu_ps(dst.get_unchecked_mut(4..).as_mut_ptr(), k1);
-                _mm_storeu_ps(dst.get_unchecked_mut(8..).as_mut_ptr(), k2);
-                _mm_storeu_ps(dst.get_unchecked_mut(12..).as_mut_ptr(), k3);
+                k0.write(dst);
+                k1.write(dst.get_unchecked_mut(4..));
+                k2.write(dst.get_unchecked_mut(8..));
+                k3.write(dst.get_unchecked_mut(12..));
             }
 
             let output = output.chunks_exact_mut(16).into_remainder();
@@ -199,18 +166,14 @@ impl SseConvolution1dF32 {
                 let zx = x * 4;
                 let shifted_src = arena.get_unchecked(p + zx..);
 
-                let mut k = _mm_mul_ps(_mm_loadu_ps(shifted_src.as_ptr()), c0);
+                let mut k = SseVector::load(shifted_src) * c0;
 
                 for i in 1..filter_size {
-                    let coeff = _mm_load1_ps(kernel.get_unchecked(i));
-                    k = _mm_fma_ps(
-                        _mm_loadu_ps(shifted_src.get_unchecked(i..).as_ptr()),
-                        coeff,
-                        k,
-                    );
+                    let coeff = SseVector::load1(kernel.get_unchecked(i..));
+                    k = SseVector::load(shifted_src.get_unchecked(i..)).mul_add(coeff, k);
                 }
 
-                _mm_storeu_ps(dst.as_mut_ptr(), k);
+                k.write(dst);
             }
 
             p += output.chunks_exact_mut(4).len() * 4;

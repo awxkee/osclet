@@ -77,7 +77,7 @@ pub(crate) fn _mm_load2_ps(a: *const f32) -> __m128 {
 #[inline]
 #[target_feature(enable = "sse4.1")]
 pub(crate) fn _mm_store2_ps(a: *mut f32, x: __m128) {
-    unsafe { _mm_storeu_si64(a.cast(), _mm_castps_si128(x)) }
+    unsafe { _mm_storel_pd(a.cast(), _mm_castps_pd(x)) }
 }
 
 #[inline]

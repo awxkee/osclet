@@ -31,11 +31,7 @@ use crate::convolve1d::{Convolve1d, ConvolvePaddings};
 use crate::err::OscletError;
 use crate::filter_padding::write_arena_1d;
 use crate::mla::fmla;
-use crate::sse::util::_mm_fma_pd;
-#[cfg(target_arch = "x86")]
-use std::arch::x86::*;
-#[cfg(target_arch = "x86_64")]
-use std::arch::x86_64::*;
+use crate::sse::sse_vector_d::SseVectorD;
 use std::ops::Mul;
 
 pub(crate) struct SseConvolution1dF64 {
@@ -114,7 +110,7 @@ impl SseConvolution1dF64 {
         )?;
 
         unsafe {
-            let c0 = _mm_set1_pd(*kernel.get_unchecked(0));
+            let c0 = SseVectorD::dup(*kernel.get_unchecked(0));
 
             let mut p = output.chunks_exact_mut(8).len() * 8;
 
@@ -122,76 +118,47 @@ impl SseConvolution1dF64 {
                 let zx = x * 8;
                 let shifted_src = arena.get_unchecked(zx..);
 
-                let mut k0 = _mm_mul_pd(_mm_loadu_pd(shifted_src.as_ptr()), c0);
-                let mut k1 = _mm_mul_pd(_mm_loadu_pd(shifted_src.get_unchecked(2..).as_ptr()), c0);
-                let mut k2 = _mm_mul_pd(_mm_loadu_pd(shifted_src.get_unchecked(4..).as_ptr()), c0);
-                let mut k3 = _mm_mul_pd(_mm_loadu_pd(shifted_src.get_unchecked(6..).as_ptr()), c0);
+                let mut k0 = SseVectorD::load(shifted_src) * c0;
+                let mut k1 = SseVectorD::load(shifted_src.get_unchecked(2..)) * c0;
+                let mut k2 = SseVectorD::load(shifted_src.get_unchecked(4..)) * c0;
+                let mut k3 = SseVectorD::load(shifted_src.get_unchecked(6..)) * c0;
 
                 let mut f = 1usize;
 
                 while f + 4 < filter_size {
-                    let c0 = _mm_loadu_pd(kernel.get_unchecked(f..).as_ptr());
-                    let c1 = _mm_loadu_pd(kernel.get_unchecked(f + 2..).as_ptr());
+                    let c0 = SseVectorD::load(kernel.get_unchecked(f..));
+                    let c1 = SseVectorD::load(kernel.get_unchecked(f + 2..));
                     macro_rules! step {
                         ($i: expr, $c: expr, $k: expr) => {
-                            let c = _mm_shuffle_pd::<$k>($c, $c);
-                            k0 = _mm_fma_pd(
-                                _mm_loadu_pd(shifted_src.get_unchecked($i..).as_ptr()),
-                                c,
-                                k0,
-                            );
-                            k1 = _mm_fma_pd(
-                                _mm_loadu_pd(shifted_src.get_unchecked($i + 2..).as_ptr()),
-                                c,
-                                k1,
-                            );
-                            k2 = _mm_fma_pd(
-                                _mm_loadu_pd(shifted_src.get_unchecked($i + 4..).as_ptr()),
-                                c,
-                                k2,
-                            );
-                            k3 = _mm_fma_pd(
-                                _mm_loadu_pd(shifted_src.get_unchecked($i + 6..).as_ptr()),
-                                c,
-                                k3,
-                            );
+                            let c = $c.duplicate_element::<$k>();
+                            k0 = SseVectorD::load(shifted_src.get_unchecked($i..)).mul_add(c, k0);
+                            k1 = SseVectorD::load(shifted_src.get_unchecked($i + 2..))
+                                .mul_add(c, k1);
+                            k2 = SseVectorD::load(shifted_src.get_unchecked($i + 4..))
+                                .mul_add(c, k2);
+                            k3 = SseVectorD::load(shifted_src.get_unchecked($i + 6..))
+                                .mul_add(c, k3);
                         };
                     }
                     step!(f, c0, 0);
-                    step!(f + 1, c0, 0b11);
+                    step!(f + 1, c0, 1);
                     step!(f + 2, c1, 0);
-                    step!(f + 3, c1, 0b11);
+                    step!(f + 3, c1, 1);
                     f += 4;
                 }
 
                 for i in f..filter_size {
-                    let coeff = _mm_load1_pd(kernel.get_unchecked(i));
-                    k0 = _mm_fma_pd(
-                        _mm_loadu_pd(shifted_src.get_unchecked(i..).as_ptr()),
-                        coeff,
-                        k0,
-                    );
-                    k1 = _mm_fma_pd(
-                        _mm_loadu_pd(shifted_src.get_unchecked(i + 2..).as_ptr()),
-                        coeff,
-                        k1,
-                    );
-                    k2 = _mm_fma_pd(
-                        _mm_loadu_pd(shifted_src.get_unchecked(i + 4..).as_ptr()),
-                        coeff,
-                        k2,
-                    );
-                    k3 = _mm_fma_pd(
-                        _mm_loadu_pd(shifted_src.get_unchecked(i + 6..).as_ptr()),
-                        coeff,
-                        k3,
-                    );
+                    let coeff = SseVectorD::load1(kernel.get_unchecked(i..));
+                    k0 = SseVectorD::load(shifted_src.get_unchecked(i..)).mul_add(coeff, k0);
+                    k1 = SseVectorD::load(shifted_src.get_unchecked(i + 2..)).mul_add(coeff, k1);
+                    k2 = SseVectorD::load(shifted_src.get_unchecked(i + 4..)).mul_add(coeff, k2);
+                    k3 = SseVectorD::load(shifted_src.get_unchecked(i + 6..)).mul_add(coeff, k3);
                 }
 
-                _mm_storeu_pd(dst.as_mut_ptr(), k0);
-                _mm_storeu_pd(dst.get_unchecked_mut(2..).as_mut_ptr(), k1);
-                _mm_storeu_pd(dst.get_unchecked_mut(4..).as_mut_ptr(), k2);
-                _mm_storeu_pd(dst.get_unchecked_mut(6..).as_mut_ptr(), k3);
+                k0.write(dst);
+                k1.write(dst.get_unchecked_mut(2..));
+                k2.write(dst.get_unchecked_mut(4..));
+                k3.write(dst.get_unchecked_mut(6..));
             }
 
             let output = output.chunks_exact_mut(8).into_remainder();
@@ -200,25 +167,17 @@ impl SseConvolution1dF64 {
                 let zx = x * 4;
                 let shifted_src = arena.get_unchecked(p + zx..);
 
-                let mut k0 = _mm_mul_pd(_mm_loadu_pd(shifted_src.as_ptr()), c0);
-                let mut k1 = _mm_mul_pd(_mm_loadu_pd(shifted_src.get_unchecked(2..).as_ptr()), c0);
+                let mut k0 = SseVectorD::load(shifted_src) * c0;
+                let mut k1 = SseVectorD::load(shifted_src.get_unchecked(2..)) * c0;
 
                 for i in 1..filter_size {
-                    let coeff = _mm_load1_pd(kernel.get_unchecked(i));
-                    k0 = _mm_fma_pd(
-                        _mm_loadu_pd(shifted_src.get_unchecked(i..).as_ptr()),
-                        coeff,
-                        k0,
-                    );
-                    k1 = _mm_fma_pd(
-                        _mm_loadu_pd(shifted_src.get_unchecked(i + 2..).as_ptr()),
-                        coeff,
-                        k1,
-                    );
+                    let coeff = SseVectorD::load1(kernel.get_unchecked(i..));
+                    k0 = SseVectorD::load(shifted_src.get_unchecked(i..)).mul_add(coeff, k0);
+                    k1 = SseVectorD::load(shifted_src.get_unchecked(i + 2..)).mul_add(coeff, k1);
                 }
 
-                _mm_storeu_pd(dst.as_mut_ptr(), k0);
-                _mm_storeu_pd(dst.get_unchecked_mut(2..).as_mut_ptr(), k1);
+                k0.write(dst);
+                k1.write(dst.get_unchecked_mut(2..));
             }
 
             p += output.chunks_exact_mut(4).len() * 4;

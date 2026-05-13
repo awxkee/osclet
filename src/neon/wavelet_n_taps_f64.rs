@@ -120,7 +120,7 @@ impl DwtForwardExecutor<f64> for NeonWaveletNTapsF64 {
 
                 let mut u = 0usize;
 
-                while u + 4 < self.filter_length {
+                while u + 4 <= self.filter_length {
                     let q0 = vld1q_f64(input.get_unchecked(u..).as_ptr());
                     let q1 = vld1q_f64(input.get_unchecked(u + 2..).as_ptr());
                     let q2 = vld1q_f64(input.get_unchecked(u + 4..).as_ptr());
@@ -278,14 +278,16 @@ impl DwtInverseExecutor<f64> for NeonWaveletNTapsF64 {
 
                     for ((wg, wh), dst) in self
                         .high_pass
-                        .chunks_exact(8)
-                        .zip(self.low_pass.chunks_exact(8))
-                        .zip(part.chunks_exact_mut(8))
+                        .as_chunks::<8>()
+                        .0
+                        .iter()
+                        .zip(self.low_pass.as_chunks::<8>().0.iter())
+                        .zip(part.as_chunks_mut::<8>().0.iter_mut())
                     {
                         let xw0 = vld1q_f64(dst.as_ptr());
-                        let xw1 = vld1q_f64(dst.get_unchecked(2..).as_ptr());
-                        let xw2 = vld1q_f64(dst.get_unchecked(4..).as_ptr());
-                        let xw3 = vld1q_f64(dst.get_unchecked(6..).as_ptr());
+                        let xw1 = vld1q_f64(dst[2..].as_ptr());
+                        let xw2 = vld1q_f64(dst[4..].as_ptr());
+                        let xw3 = vld1q_f64(dst[6..].as_ptr());
 
                         let q0 = vfmaq_n_f64(
                             vfmaq_n_f64(xw0, vld1q_f64(wh.as_ptr()), h),
@@ -293,30 +295,30 @@ impl DwtInverseExecutor<f64> for NeonWaveletNTapsF64 {
                             g,
                         );
                         let q1 = vfmaq_n_f64(
-                            vfmaq_n_f64(xw1, vld1q_f64(wh.get_unchecked(2..).as_ptr()), h),
-                            vld1q_f64(wg.get_unchecked(2..).as_ptr()),
+                            vfmaq_n_f64(xw1, vld1q_f64(wh[2..].as_ptr()), h),
+                            vld1q_f64(wg[2..].as_ptr()),
                             g,
                         );
                         let q2 = vfmaq_n_f64(
-                            vfmaq_n_f64(xw2, vld1q_f64(wh.get_unchecked(4..).as_ptr()), h),
-                            vld1q_f64(wg.get_unchecked(4..).as_ptr()),
+                            vfmaq_n_f64(xw2, vld1q_f64(wh[4..].as_ptr()), h),
+                            vld1q_f64(wg[4..].as_ptr()),
                             g,
                         );
                         let q3 = vfmaq_n_f64(
-                            vfmaq_n_f64(xw3, vld1q_f64(wh.get_unchecked(6..).as_ptr()), h),
-                            vld1q_f64(wg.get_unchecked(6..).as_ptr()),
+                            vfmaq_n_f64(xw3, vld1q_f64(wh[6..].as_ptr()), h),
+                            vld1q_f64(wg[6..].as_ptr()),
                             g,
                         );
 
                         vst1q_f64(dst.as_mut_ptr(), q0);
-                        vst1q_f64(dst.get_unchecked_mut(2..).as_mut_ptr(), q1);
-                        vst1q_f64(dst.get_unchecked_mut(4..).as_mut_ptr(), q2);
-                        vst1q_f64(dst.get_unchecked_mut(6..).as_mut_ptr(), q3);
+                        vst1q_f64(dst[2..].as_mut_ptr(), q1);
+                        vst1q_f64(dst[4..].as_mut_ptr(), q2);
+                        vst1q_f64(dst[6..].as_mut_ptr(), q3);
                     }
 
-                    let part = part.chunks_exact_mut(8).into_remainder();
-                    let high_pass = self.high_pass.chunks_exact(8).remainder();
-                    let low_pass = self.low_pass.chunks_exact(8).remainder();
+                    let part = part.as_chunks_mut::<8>().1;
+                    let high_pass = self.high_pass.as_chunks::<8>().1;
+                    let low_pass = self.low_pass.as_chunks::<8>().1;
 
                     for ((wg, wh), dst) in high_pass
                         .chunks_exact(4)

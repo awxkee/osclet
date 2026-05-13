@@ -96,14 +96,14 @@ impl DwtForwardExecutor<f64> for NeonWavelet8TapsF64 {
             let h0 = vld1q_f64(self.low_pass.as_ptr());
             let g0 = vld1q_f64(self.high_pass.as_ptr());
 
-            let h1 = vld1q_f64(self.low_pass.get_unchecked(2..).as_ptr());
-            let g1 = vld1q_f64(self.high_pass.get_unchecked(2..).as_ptr());
+            let h1 = vld1q_f64(self.low_pass[2..].as_ptr());
+            let g1 = vld1q_f64(self.high_pass[2..].as_ptr());
 
-            let h2 = vld1q_f64(self.low_pass.get_unchecked(4..).as_ptr());
-            let g2 = vld1q_f64(self.high_pass.get_unchecked(4..).as_ptr());
+            let h2 = vld1q_f64(self.low_pass[4..].as_ptr());
+            let g2 = vld1q_f64(self.high_pass[4..].as_ptr());
 
-            let h3 = vld1q_f64(self.low_pass.get_unchecked(6..).as_ptr());
-            let g3 = vld1q_f64(self.high_pass.get_unchecked(6..).as_ptr());
+            let h3 = vld1q_f64(self.low_pass[6..].as_ptr());
+            let g3 = vld1q_f64(self.high_pass[6..].as_ptr());
 
             let interpolation = BorderInterpolation::new(self.border_mode, 0, input.len() as isize);
 
@@ -365,18 +365,18 @@ impl DwtInverseExecutor<f64> for NeonWavelet8TapsF64 {
                 let h0 = vld1q_f64(self.low_pass.as_ptr());
                 let g0 = vld1q_f64(self.high_pass.as_ptr());
 
-                let h1 = vld1q_f64(self.low_pass.get_unchecked(2..).as_ptr());
-                let g1 = vld1q_f64(self.high_pass.get_unchecked(2..).as_ptr());
+                let h1 = vld1q_f64(self.low_pass[2..].as_ptr());
+                let g1 = vld1q_f64(self.high_pass[2..].as_ptr());
 
-                let h2 = vld1q_f64(self.low_pass.get_unchecked(4..).as_ptr());
-                let g2 = vld1q_f64(self.high_pass.get_unchecked(4..).as_ptr());
+                let h2 = vld1q_f64(self.low_pass[4..].as_ptr());
+                let g2 = vld1q_f64(self.high_pass[4..].as_ptr());
 
-                let h3 = vld1q_f64(self.low_pass.get_unchecked(6..).as_ptr());
-                let g3 = vld1q_f64(self.high_pass.get_unchecked(6..).as_ptr());
+                let h3 = vld1q_f64(self.low_pass[6..].as_ptr());
+                let g3 = vld1q_f64(self.high_pass[6..].as_ptr());
 
                 let mut ui = safe_start;
 
-                while ui + 2 < safe_end {
+                while ui + 2 <= safe_end {
                     let (h, g) = (
                         vld1q_f64(approx.get_unchecked(ui)),
                         vld1q_f64(details.get_unchecked(ui)),
@@ -392,12 +392,12 @@ impl DwtInverseExecutor<f64> for NeonWavelet8TapsF64 {
                     let w0 = vfmaq_laneq_f64::<0>(vfmaq_laneq_f64::<0>(q0, h0, h), g0, g);
                     let w1 = vfmaq_laneq_f64::<0>(vfmaq_laneq_f64::<0>(q1, h1, h), g1, g);
                     let w2 = vfmaq_laneq_f64::<0>(vfmaq_laneq_f64::<0>(q2, h2, h), g2, g);
-                    let w3 = vfmaq_laneq_f64::<0>(vfmaq_laneq_f64::<0>(q3, h2, h), g2, g);
+                    let w3 = vfmaq_laneq_f64::<0>(vfmaq_laneq_f64::<0>(q3, h3, h), g3, g);
 
                     let w4 = vfmaq_laneq_f64::<1>(vfmaq_laneq_f64::<1>(w1, h0, h), g0, g);
                     let w5 = vfmaq_laneq_f64::<1>(vfmaq_laneq_f64::<1>(w2, h1, h), g1, g);
                     let w6 = vfmaq_laneq_f64::<1>(vfmaq_laneq_f64::<1>(w3, h2, h), g2, g);
-                    let w7 = vfmaq_laneq_f64::<1>(vfmaq_laneq_f64::<1>(q4, h2, h), g2, g);
+                    let w7 = vfmaq_laneq_f64::<1>(vfmaq_laneq_f64::<1>(q4, h3, h), g3, g);
 
                     vst1q_f64(part0.as_mut_ptr(), w0);
                     vst1q_f64(part0.get_unchecked_mut(2..).as_mut_ptr(), w4);
@@ -506,7 +506,7 @@ mod tests {
         approx.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (REFERENCE_APPROX[i] - x).abs() < 1e-7,
-                "approx difference expected to be < 1e-7, but values were ref {}, derived {}",
+                "approx difference expected to be < 1e-7, but values were ref {}, derived {} at {i}",
                 REFERENCE_APPROX[i],
                 x
             );
@@ -514,7 +514,7 @@ mod tests {
         details.iter().enumerate().for_each(|(i, x)| {
             assert!(
                 (REFERENCE_DETAILS[i] - x).abs() < 1e-7,
-                "details difference expected to be < 1e-7, but values were ref {}, derived {}",
+                "details difference expected to be < 1e-7, but values were ref {}, derived {} at {i}",
                 REFERENCE_DETAILS[i],
                 x
             );
@@ -526,7 +526,7 @@ mod tests {
         reconstructed.iter().take(input.len()).enumerate().for_each(|(i, x)| {
             assert!(
                 (input[i] - x).abs() < 1e-7,
-                "reconstructed difference expected to be < 1e-7, but values were ref {}, derived {}",
+                "reconstructed difference expected to be < 1e-7, but values were ref {}, derived {} at {i}",
                 input[i],
                 x
             );

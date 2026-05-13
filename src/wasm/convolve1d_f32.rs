@@ -125,7 +125,7 @@ impl WasmConvolution1dF32 {
 
                 let mut f = 1usize;
 
-                while f + 4 < filter_size {
+                while f + 4 <= filter_size {
                     let coeff = WasmVector::load(kernel.get_unchecked(f..));
                     macro_rules! step {
                         ($i: expr, $k: expr) => {

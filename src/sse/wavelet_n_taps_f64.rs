@@ -146,7 +146,7 @@ impl SseWaveletNTapsF64 {
 
                 let mut u = 0usize;
 
-                while u + 4 < self.filter_length {
+                while u + 4 <= self.filter_length {
                     let q0 = SseVectorD::load(input.get_unchecked(u..));
                     let q1 = SseVectorD::load(input.get_unchecked(u + 2..));
                     let q2 = SseVectorD::load(input.get_unchecked(u + 4..));

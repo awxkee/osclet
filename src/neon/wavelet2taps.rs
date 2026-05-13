@@ -223,7 +223,7 @@ impl DwtInverseExecutor<f64> for NeonWavelet2TapsF64 {
 
                 let mut uq = safe_start;
 
-                while uq + 2 < safe_end {
+                while uq + 2 <= safe_end {
                     let (h, g) = (
                         vld1q_f64(approx.get_unchecked(uq..).as_ptr()),
                         vld1q_f64(details.get_unchecked(uq..).as_ptr()),
@@ -387,8 +387,8 @@ impl DwtForwardExecutor<f32> for NeonWavelet2TapsF32 {
                 processed += 8;
             }
 
-            let approx = approx.chunks_exact_mut(8).into_remainder();
-            let details = details.chunks_exact_mut(8).into_remainder();
+            let approx = approx.as_chunks_mut::<8>().1;
+            let details = details.as_chunks_mut::<8>().1;
             let padded_input = input.get_unchecked(processed * 2..);
             processed = 0;
 
@@ -419,8 +419,8 @@ impl DwtForwardExecutor<f32> for NeonWavelet2TapsF32 {
                 processed += 4;
             }
 
-            let approx = approx.chunks_exact_mut(4).into_remainder();
-            let details = details.chunks_exact_mut(4).into_remainder();
+            let approx = approx.as_chunks_mut::<4>().1;
+            let details = details.as_chunks_mut::<4>().1;
             let padded_input = padded_input.get_unchecked(processed * 2..);
 
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {

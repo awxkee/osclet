@@ -115,11 +115,11 @@ impl AvxWavelet10TapsF64 {
             let h0 = _mm256_loadu_pd(self.low_pass.as_ptr());
             let g0 = _mm256_loadu_pd(self.high_pass.as_ptr());
 
-            let h2 = _mm256_loadu_pd(self.low_pass.get_unchecked(4..).as_ptr());
-            let g2 = _mm256_loadu_pd(self.high_pass.get_unchecked(4..).as_ptr());
+            let h2 = _mm256_loadu_pd(self.low_pass[4..].as_ptr());
+            let g2 = _mm256_loadu_pd(self.high_pass[4..].as_ptr());
 
-            let h8 = _mm256_loadu_pd(self.low_pass.get_unchecked(8..).as_ptr());
-            let g8 = _mm256_loadu_pd(self.high_pass.get_unchecked(8..).as_ptr());
+            let h8 = _mm256_loadu_pd(self.low_pass[8..].as_ptr());
+            let g8 = _mm256_loadu_pd(self.high_pass[8..].as_ptr());
 
             let interpolation = BorderInterpolation::new(self.border_mode, 0, input.len() as isize);
 
@@ -293,11 +293,11 @@ impl AvxWavelet10TapsF64 {
                 let h0 = _mm256_loadu_pd(self.low_pass.as_ptr());
                 let g0 = _mm256_loadu_pd(self.high_pass.as_ptr());
 
-                let h2 = _mm256_loadu_pd(self.low_pass.get_unchecked(4..).as_ptr());
-                let g2 = _mm256_loadu_pd(self.high_pass.get_unchecked(4..).as_ptr());
+                let h2 = _mm256_loadu_pd(self.low_pass[4..].as_ptr());
+                let g2 = _mm256_loadu_pd(self.high_pass[4..].as_ptr());
 
-                let h8 = _mm_loadu_pd(self.low_pass.get_unchecked(8..).as_ptr());
-                let g8 = _mm_loadu_pd(self.high_pass.get_unchecked(8..).as_ptr());
+                let h8 = _mm_loadu_pd(self.low_pass[8..].as_ptr());
+                let g8 = _mm_loadu_pd(self.high_pass[8..].as_ptr());
 
                 for i in safe_start..safe_end {
                     let (h, g) = (

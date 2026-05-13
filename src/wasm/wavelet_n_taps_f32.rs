@@ -147,7 +147,7 @@ impl WasmWaveletNTapsF32 {
 
                 let mut u = 0usize;
 
-                while u + 4 < self.filter_length {
+                while u + 4 <= self.filter_length {
                     let q0 = WasmVector::load(input.get_unchecked(u..));
                     let q2 = WasmVector::load(input.get_unchecked(u + 4..));
                     let pq2 = WasmVector::load2(input.get_unchecked(u + 8..));
@@ -219,7 +219,7 @@ impl WasmWaveletNTapsF32 {
 
                 let mut u = 0usize;
 
-                while u + 4 < self.filter_length {
+                while u + 4 <= self.filter_length {
                     let q0 = WasmVector::load(input.get_unchecked(u..));
                     let pq1 = WasmVector::load2(input.get_unchecked(u + 4..));
 
@@ -409,38 +409,42 @@ impl WasmWaveletNTapsF32 {
 
                     for ((wg, wh), dst) in self
                         .high_pass
-                        .chunks_exact(16)
-                        .zip(self.low_pass.chunks_exact(16))
-                        .zip(part.chunks_exact_mut(16))
+                        .as_chunks::<16>()
+                        .0
+                        .iter()
+                        .zip(self.low_pass.as_chunks::<16>().0.iter())
+                        .zip(part.as_chunks_mut::<16>().0.iter_mut())
                     {
                         let xw0 = WasmVector::load(dst);
-                        let xw1 = WasmVector::load(dst.get_unchecked(4..));
-                        let xw2 = WasmVector::load(dst.get_unchecked(8..));
-                        let xw3 = WasmVector::load(dst.get_unchecked(12..));
+                        let xw1 = WasmVector::load(&dst[4..]);
+                        let xw2 = WasmVector::load(&dst[8..]);
+                        let xw3 = WasmVector::load(&dst[12..]);
 
                         let q0 =
                             WasmVector::load(wg).mul_add(g, WasmVector::load(wh).mul_add(h, xw0));
-                        let q1 = WasmVector::load(wg.get_unchecked(4..))
-                            .mul_add(g, WasmVector::load(wh.get_unchecked(4..)).mul_add(h, xw1));
-                        let q2 = WasmVector::load(wg.get_unchecked(8..))
-                            .mul_add(g, WasmVector::load(wh.get_unchecked(8..)).mul_add(h, xw2));
-                        let q3 = WasmVector::load(wg.get_unchecked(12..))
-                            .mul_add(g, WasmVector::load(wh.get_unchecked(12..)).mul_add(h, xw3));
+                        let q1 = WasmVector::load(&wg[4..])
+                            .mul_add(g, WasmVector::load(&wh[4..]).mul_add(h, xw1));
+                        let q2 = WasmVector::load(&wg[8..])
+                            .mul_add(g, WasmVector::load(&wh[8..]).mul_add(h, xw2));
+                        let q3 = WasmVector::load(&wg[12..])
+                            .mul_add(g, WasmVector::load(&wh[12..]).mul_add(h, xw3));
 
                         q0.write(dst);
-                        q1.write(dst.get_unchecked_mut(4..));
-                        q2.write(dst.get_unchecked_mut(8..));
-                        q3.write(dst.get_unchecked_mut(12..));
+                        q1.write(&mut dst[4..]);
+                        q2.write(&mut dst[8..]);
+                        q3.write(&mut dst[12..]);
                     }
 
-                    let part = part.chunks_exact_mut(16).into_remainder();
-                    let high_pass = self.high_pass.chunks_exact(16).remainder();
-                    let low_pass = self.low_pass.chunks_exact(16).remainder();
+                    let part = part.as_chunks_mut::<16>().1;
+                    let high_pass = self.high_pass.as_chunks::<16>().1;
+                    let low_pass = self.low_pass.as_chunks::<16>().1;
 
                     for ((wg, wh), dst) in high_pass
-                        .chunks_exact(4)
-                        .zip(low_pass.chunks_exact(4))
-                        .zip(part.chunks_exact_mut(4))
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .zip(low_pass.as_chunks::<4>().0.iter())
+                        .zip(part.as_chunks_mut::<4>().0.iter_mut())
                     {
                         let xw0 = WasmVector::load(dst);
                         let q0 =
@@ -448,9 +452,9 @@ impl WasmWaveletNTapsF32 {
                         q0.write(dst);
                     }
 
-                    let part = part.chunks_exact_mut(4).into_remainder();
-                    let high_pass = self.high_pass.chunks_exact(4).remainder();
-                    let low_pass = self.low_pass.chunks_exact(4).remainder();
+                    let part = part.as_chunks_mut::<4>().1;
+                    let high_pass = high_pass.as_chunks::<4>().1;
+                    let low_pass = low_pass.as_chunks::<4>().1;
 
                     for ((wg, wh), dst) in
                         high_pass.iter().zip(low_pass.iter()).zip(part.iter_mut())

@@ -325,7 +325,7 @@ impl AvxWavelet4TapsF64 {
 
                 let mut ui = safe_start;
 
-                while ui + 2 < safe_end {
+                while ui + 2 <= safe_end {
                     let (h, g) = (
                         _mm_loadu_pd(approx.get_unchecked(ui..).as_ptr()),
                         _mm_loadu_pd(details.get_unchecked(ui..).as_ptr()),

@@ -80,7 +80,7 @@ impl AvxConvolution1dF32 {
 
             let max_safe_end = arena.len().saturating_sub(padding_right);
 
-            while x + 16 < max_safe_end {
+            while x + 16 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k0 = _mm256_mul_ps(_mm256_loadu_ps(shifted_src.as_ptr()), c0);
@@ -109,7 +109,7 @@ impl AvxConvolution1dF32 {
                 x += 16;
             }
 
-            while x + 4 < max_safe_end {
+            while x + 4 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k = _mm_mul_ps(
@@ -205,7 +205,7 @@ impl AvxConvolution1dF32 {
 
             let max_safe_end = arena.len().saturating_sub(padding_right);
 
-            while x + 16 < max_safe_end {
+            while x + 16 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k0 = _mm256_mul_ps(_mm256_loadu_ps(shifted_src.as_ptr()), c0);
@@ -236,7 +236,7 @@ impl AvxConvolution1dF32 {
                 x += 16;
             }
 
-            while x + 4 < max_safe_end {
+            while x + 4 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k = _mm_mul_ps(
@@ -350,7 +350,7 @@ impl AvxConvolution1dF32 {
             let c4 = _mm256_setr_m128(c4, c4);
             let c5 = _mm256_setr_m128(c5, c5);
 
-            while x + 16 < max_safe_end {
+            while x + 16 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k0 = _mm256_mul_ps(_mm256_loadu_ps(shifted_src.as_ptr()), c0);
@@ -383,7 +383,7 @@ impl AvxConvolution1dF32 {
                 x += 16;
             }
 
-            while x + 4 < max_safe_end {
+            while x + 4 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k = _mm_mul_ps(
@@ -508,7 +508,7 @@ impl AvxConvolution1dF32 {
             let c6 = _mm256_setr_m128(c6, c6);
             let c7 = _mm256_setr_m128(c7, c7);
 
-            while x + 16 < max_safe_end {
+            while x + 16 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k0 = _mm256_mul_ps(_mm256_loadu_ps(shifted_src.as_ptr()), c0);
@@ -543,7 +543,7 @@ impl AvxConvolution1dF32 {
                 x += 16;
             }
 
-            while x + 4 < max_safe_end {
+            while x + 4 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k = _mm_mul_ps(

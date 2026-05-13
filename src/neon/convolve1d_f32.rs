@@ -76,7 +76,7 @@ impl NeonConvolution1dF32 {
 
             let c0 = vld1_f32(kernel.as_ptr().cast());
 
-            while x + 16 < max_safe_end {
+            while x + 16 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k0 = vmulq_lane_f32::<0>(vld1q_f32(shifted_src.as_ptr()), c0);
@@ -121,7 +121,7 @@ impl NeonConvolution1dF32 {
                 x += 16;
             }
 
-            while x + 4 < max_safe_end {
+            while x + 4 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k = vmulq_lane_f32::<0>(vld1q_f32(shifted_src.as_ptr()), c0);
@@ -207,7 +207,7 @@ impl NeonConvolution1dF32 {
 
             let max_safe_end = arena.len().saturating_sub(padding_right);
 
-            while x + 16 < max_safe_end {
+            while x + 16 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k0 = vmulq_laneq_f32::<0>(vld1q_f32(shifted_src.as_ptr()), c0);
@@ -254,7 +254,7 @@ impl NeonConvolution1dF32 {
                 x += 16;
             }
 
-            while x + 4 < max_safe_end {
+            while x + 4 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k = vmulq_laneq_f32::<0>(vld1q_f32(shifted_src.as_ptr()), c0);
@@ -323,7 +323,7 @@ impl NeonConvolution1dF32 {
 
             let interpolation = BorderInterpolation::new(self.border_mode, 0, arena.len() as isize);
 
-            let c0 = vld1q_f32(kernel.get_unchecked(0..).as_ptr());
+            let c0 = vld1q_f32(kernel.as_ptr());
             let c4 = vld1q_f32([kernel[4], kernel[5], 0., 0.].as_ptr());
 
             let mut x = 0usize;
@@ -351,7 +351,7 @@ impl NeonConvolution1dF32 {
 
             let max_safe_end = arena.len().saturating_sub(padding_right);
 
-            while x + 16 < max_safe_end {
+            while x + 16 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k0 = vmulq_laneq_f32::<0>(vld1q_f32(shifted_src.as_ptr()), c0);
@@ -426,7 +426,7 @@ impl NeonConvolution1dF32 {
                 x += 16;
             }
 
-            while x + 4 < max_safe_end {
+            while x + 4 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k = vmulq_laneq_f32::<0>(vld1q_f32(shifted_src.as_ptr()), c0);
@@ -515,8 +515,8 @@ impl NeonConvolution1dF32 {
         unsafe {
             let interpolation = BorderInterpolation::new(self.border_mode, 0, arena.len() as isize);
 
-            let c0 = vld1q_f32(kernel.get_unchecked(0..).as_ptr());
-            let c4 = vld1q_f32(kernel.get_unchecked(4..).as_ptr());
+            let c0 = vld1q_f32(kernel.as_ptr());
+            let c4 = vld1q_f32(kernel[4..].as_ptr());
 
             let mut x = 0usize;
 
@@ -543,7 +543,7 @@ impl NeonConvolution1dF32 {
 
             let max_safe_end = arena.len().saturating_sub(padding_right);
 
-            while x + 16 < max_safe_end {
+            while x + 16 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k0 = vmulq_laneq_f32::<0>(vld1q_f32(shifted_src.as_ptr()), c0);
@@ -595,7 +595,7 @@ impl NeonConvolution1dF32 {
                 x += 16;
             }
 
-            while x + 4 < max_safe_end {
+            while x + 4 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k = vmulq_laneq_f32::<0>(vld1q_f32(shifted_src.as_ptr()), c0);
@@ -674,8 +674,8 @@ impl NeonConvolution1dF32 {
         unsafe {
             let interpolation = BorderInterpolation::new(self.border_mode, 0, arena.len() as isize);
 
-            let c0 = vld1q_f32(kernel.get_unchecked(0..).as_ptr());
-            let c4 = vld1q_f32(kernel.get_unchecked(4..).as_ptr());
+            let c0 = vld1q_f32(kernel.as_ptr());
+            let c4 = vld1q_f32(kernel[4..].as_ptr());
             let c8 = vld1q_f32([kernel[8], kernel[9], 0., 0.].as_ptr());
 
             let mut x = 0usize;
@@ -706,7 +706,7 @@ impl NeonConvolution1dF32 {
 
             let max_safe_end = arena.len().saturating_sub(padding_right);
 
-            while x + 16 < max_safe_end {
+            while x + 16 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k0 = vmulq_laneq_f32::<0>(vld1q_f32(shifted_src.as_ptr()), c0);
@@ -760,7 +760,7 @@ impl NeonConvolution1dF32 {
                 x += 16;
             }
 
-            while x + 4 < max_safe_end {
+            while x + 4 <= max_safe_end {
                 let shifted_src = arena.get_unchecked(x - padding_left..);
 
                 let mut k = vmulq_laneq_f32::<0>(vld1q_f32(shifted_src.as_ptr()), c0);
@@ -918,7 +918,7 @@ impl Convolve1d<f32> for NeonConvolution1dF32 {
 
                 let mut f = 1usize;
 
-                while f + 4 < filter_size {
+                while f + 4 <= filter_size {
                     let coeff = vld1q_f32(kernel.get_unchecked(f..).as_ptr());
                     macro_rules! step {
                         ($i: expr, $coeff: expr, $k: expr) => {

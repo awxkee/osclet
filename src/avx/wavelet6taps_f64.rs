@@ -115,8 +115,8 @@ impl AvxWavelet6TapsF64 {
             let h0 = _mm256_loadu_pd(self.low_pass.as_ptr());
             let g0 = _mm256_loadu_pd(self.high_pass.as_ptr());
 
-            let h2 = _mm256_loadu_pd(self.low_pass.get_unchecked(4..).as_ptr());
-            let g2 = _mm256_loadu_pd(self.high_pass.get_unchecked(4..).as_ptr());
+            let h2 = _mm256_loadu_pd(self.low_pass[4..].as_ptr());
+            let g2 = _mm256_loadu_pd(self.high_pass[4..].as_ptr());
 
             let (front_approx, approx) = approx.split_at_mut(2);
             let (front_detail, details) = details.split_at_mut(2);
@@ -328,12 +328,12 @@ impl AvxWavelet6TapsF64 {
                 let h0 = _mm256_loadu_pd(self.low_pass.as_ptr());
                 let g0 = _mm256_loadu_pd(self.high_pass.as_ptr());
 
-                let h2 = _mm256_loadu_pd(self.low_pass.get_unchecked(4..).as_ptr());
-                let g2 = _mm256_loadu_pd(self.high_pass.get_unchecked(4..).as_ptr());
+                let h2 = _mm256_loadu_pd(self.low_pass[4..].as_ptr());
+                let g2 = _mm256_loadu_pd(self.high_pass[4..].as_ptr());
 
                 let mut ui = safe_start;
 
-                while ui + 2 < safe_end {
+                while ui + 2 <= safe_end {
                     let (h, g) = (
                         _mm_loadu_pd(approx.get_unchecked(ui)),
                         _mm_loadu_pd(details.get_unchecked(ui)),

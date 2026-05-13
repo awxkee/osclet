@@ -36,11 +36,16 @@ use std::sync::Arc;
 
 pub(crate) struct CompletedDwtExecutor<T> {
     intercepted: Arc<dyn IncompleteDwtExecutor<T> + Send + Sync>,
+    filter_length: usize,
 }
 
 impl<T> CompletedDwtExecutor<T> {
     pub(crate) fn new(intercepted: Arc<dyn IncompleteDwtExecutor<T> + Send + Sync>) -> Self {
-        Self { intercepted }
+        let filter_length = intercepted.filter_length();
+        Self {
+            intercepted,
+            filter_length,
+        }
     }
 }
 
@@ -91,7 +96,7 @@ impl<T> DwtInverseExecutor<T> for CompletedDwtExecutor<T> {
 
 impl<T> IncompleteDwtExecutor<T> for CompletedDwtExecutor<T> {
     fn filter_length(&self) -> usize {
-        self.intercepted.filter_length()
+        self.filter_length
     }
 }
 
@@ -117,10 +122,8 @@ where
             let mut approx = vec![];
             let mut details = vec![];
 
-            let filter_length = self.intercepted.filter_length();
-
             for _ in 0..level {
-                if filter_length > current_signal.len() {
+                if self.filter_length > current_signal.len() {
                     return Err(OscletError::BufferWasTooSmallForLevel);
                 }
 
@@ -153,48 +156,42 @@ where
             self.intercepted
                 .execute_forward(signal, &mut approx, &mut details)?;
 
-            Ok(MultiDwt {
+            return Ok(MultiDwt {
                 levels: vec![Dwt {
                     approximations: approx,
                     details,
                 }],
-            })
-        } else {
-            let mut current_signal = signal.to_vec();
-            let mut approx;
-            let mut details;
+            });
+        }
 
-            let filter_length = self.intercepted.filter_length();
+        let mut current_signal = signal.to_vec();
+        let mut dwt_size = self.intercepted.dwt_size(current_signal.len());
+        let mut approx = try_vec![T::default(); dwt_size.approx_length];
+        let mut levels_store = Vec::with_capacity(levels);
 
-            let mut levels_store = Vec::with_capacity(levels);
-
-            for _ in 0..levels {
-                if filter_length > current_signal.len() {
-                    return Err(OscletError::BufferWasTooSmallForLevel);
-                }
-
-                let dwt_size = self.intercepted.dwt_size(current_signal.len());
-
-                approx = try_vec![T::default(); dwt_size.approx_length];
-                details = try_vec![T::default(); dwt_size.details_length];
-
-                // Forward DWT on current signal
-                self.intercepted
-                    .execute_forward(&current_signal, &mut approx, &mut details)?;
-
-                // Next level uses only the approximation
-                current_signal = approx.to_vec();
-
-                levels_store.push(Dwt {
-                    approximations: approx,
-                    details,
-                });
+        for _ in 0..levels {
+            if self.filter_length > current_signal.len() {
+                return Err(OscletError::BufferWasTooSmallForLevel);
             }
 
-            Ok(MultiDwt {
-                levels: levels_store,
-            })
+            dwt_size = self.intercepted.dwt_size(current_signal.len());
+
+            approx.resize(dwt_size.approx_length, T::default());
+            let mut details = try_vec![T::default(); dwt_size.details_length];
+
+            self.execute_forward(&current_signal, &mut approx, &mut details)?;
+
+            std::mem::swap(&mut current_signal, &mut approx);
+
+            levels_store.push(Dwt {
+                approximations: current_signal.clone(),
+                details,
+            });
         }
+
+        Ok(MultiDwt {
+            levels: levels_store,
+        })
     }
 
     fn idwt(&self, dwt: &DwtRef<'_, T>) -> Result<Vec<T>, OscletError> {
@@ -262,16 +259,14 @@ mod tests {
         for i in 0..data_length {
             input[i] = i as f32 / data_length as f32;
         }
-        let db4 = CompletedDwtExecutor {
-            intercepted: Arc::new(Wavelet8Taps::new(
-                BorderMode::Wrap,
-                DaubechiesFamily::Db4
-                    .get_wavelet()
-                    .as_ref()
-                    .try_into()
-                    .unwrap(),
-            )),
-        };
+        let db4 = CompletedDwtExecutor::new(Arc::new(Wavelet8Taps::new(
+            BorderMode::Wrap,
+            DaubechiesFamily::Db4
+                .get_wavelet()
+                .as_ref()
+                .try_into()
+                .unwrap(),
+        )));
         let dwt = db4.dwt(&input, 1).unwrap();
 
         let reconstructed = db4.idwt(&dwt.to_ref()).unwrap();
@@ -292,16 +287,14 @@ mod tests {
         for i in 0..data_length {
             input[i] = i as f32 / data_length as f32;
         }
-        let db4 = CompletedDwtExecutor {
-            intercepted: Arc::new(Wavelet8Taps::new(
-                BorderMode::Wrap,
-                DaubechiesFamily::Db4
-                    .get_wavelet()
-                    .as_ref()
-                    .try_into()
-                    .unwrap(),
-            )),
-        };
+        let db4 = CompletedDwtExecutor::new(Arc::new(Wavelet8Taps::new(
+            BorderMode::Wrap,
+            DaubechiesFamily::Db4
+                .get_wavelet()
+                .as_ref()
+                .try_into()
+                .unwrap(),
+        )));
         _ = db4.multi_dwt(&input, 4).unwrap();
     }
 }

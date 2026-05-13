@@ -125,7 +125,7 @@ impl WasmConvolution1dF64 {
 
                 let mut f = 1usize;
 
-                while f + 4 < filter_size {
+                while f + 4 <= filter_size {
                     let c0 = WasmVectorD::load(kernel.get_unchecked(f..));
                     let c1 = WasmVectorD::load(kernel.get_unchecked(f + 2..));
                     macro_rules! step {

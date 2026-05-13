@@ -261,7 +261,7 @@ impl AvxWavelet2TapsF64 {
 
                 let mut uq = safe_start;
 
-                while uq + 2 < safe_end {
+                while uq + 2 <= safe_end {
                     let (h, g) = (
                         _mm_loadu_pd(approx.get_unchecked(uq..).as_ptr()),
                         _mm_loadu_pd(details.get_unchecked(uq..).as_ptr()),

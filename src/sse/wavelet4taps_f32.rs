@@ -303,7 +303,7 @@ impl SseWavelet4TapsF32 {
 
                 let mut ui = safe_start;
 
-                while ui + 4 < safe_end {
+                while ui + 4 <= safe_end {
                     let (h, g) = (
                         SseVector::load(approx.get_unchecked(ui..)),
                         SseVector::load(details.get_unchecked(ui..)),

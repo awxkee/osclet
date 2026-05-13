@@ -280,7 +280,7 @@ impl DwtInverseExecutor<f32> for NeonWavelet4TapsF32 {
 
                 let mut ui = safe_start;
 
-                while ui + 4 < safe_end {
+                while ui + 4 <= safe_end {
                     let (h, g) = (
                         vld1q_f32(approx.get_unchecked(ui)),
                         vld1q_f32(details.get_unchecked(ui)),

@@ -92,11 +92,11 @@ impl DwtForwardExecutor<f64> for NeonWavelet6TapsF64 {
             let h0 = vld1q_f64(self.low_pass.as_ptr());
             let g0 = vld1q_f64(self.high_pass.as_ptr());
 
-            let h1 = vld1q_f64(self.low_pass.get_unchecked(2..).as_ptr());
-            let g1 = vld1q_f64(self.high_pass.get_unchecked(2..).as_ptr());
+            let h1 = vld1q_f64(self.low_pass[2..].as_ptr());
+            let g1 = vld1q_f64(self.high_pass[2..].as_ptr());
 
-            let h2 = vld1q_f64(self.low_pass.get_unchecked(4..).as_ptr());
-            let g2 = vld1q_f64(self.high_pass.get_unchecked(4..).as_ptr());
+            let h2 = vld1q_f64(self.low_pass[4..].as_ptr());
+            let g2 = vld1q_f64(self.high_pass[4..].as_ptr());
 
             let interpolation = BorderInterpolation::new(self.border_mode, 0, input.len() as isize);
 
@@ -293,15 +293,15 @@ impl DwtInverseExecutor<f64> for NeonWavelet6TapsF64 {
                 let h0 = vld1q_f64(self.low_pass.as_ptr());
                 let g0 = vld1q_f64(self.high_pass.as_ptr());
 
-                let h1 = vld1q_f64(self.low_pass.get_unchecked(2..).as_ptr());
-                let g1 = vld1q_f64(self.high_pass.get_unchecked(2..).as_ptr());
+                let h1 = vld1q_f64(self.low_pass[2..].as_ptr());
+                let g1 = vld1q_f64(self.high_pass[2..].as_ptr());
 
-                let h2 = vld1q_f64(self.low_pass.get_unchecked(4..).as_ptr());
-                let g2 = vld1q_f64(self.high_pass.get_unchecked(4..).as_ptr());
+                let h2 = vld1q_f64(self.low_pass[4..].as_ptr());
+                let g2 = vld1q_f64(self.high_pass[4..].as_ptr());
 
                 let mut ui = safe_start;
 
-                while ui + 2 < safe_end {
+                while ui + 2 <= safe_end {
                     let (h, g) = (
                         vld1q_f64(approx.get_unchecked(ui)),
                         vld1q_f64(details.get_unchecked(ui)),

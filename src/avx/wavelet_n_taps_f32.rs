@@ -143,7 +143,7 @@ impl AvxWaveletNTapsF32 {
 
                 let mut u = 0usize;
 
-                while u + 4 < self.filter_length {
+                while u + 4 <= self.filter_length {
                     let q02 = _mm256_loadu_ps(input.get_unchecked(u..).as_ptr());
                     let pq2 = _mm_castsi128_ps(_mm_loadu_si64(
                         input.get_unchecked(u + 8..).as_ptr().cast(),

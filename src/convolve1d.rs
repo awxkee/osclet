@@ -216,7 +216,7 @@ where
 
         let c0 = unsafe { *kernel.get_unchecked(0) };
 
-        for (x, dst) in output.chunks_exact_mut(4).enumerate() {
+        for (x, dst) in output.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             unsafe {
                 let zx = x * 4;
                 let shifted_src = arena.get_unchecked(zx..);

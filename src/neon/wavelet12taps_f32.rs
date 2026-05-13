@@ -87,11 +87,11 @@ impl DwtForwardExecutor<f32> for NeonWavelet12TapsF32 {
 
         unsafe {
             let h0 = vld1q_f32(self.low_pass.as_ptr());
-            let h2 = vld1q_f32(self.low_pass.get_unchecked(4..).as_ptr());
-            let h4 = vld1q_f32(self.low_pass.get_unchecked(8..).as_ptr());
+            let h2 = vld1q_f32(self.low_pass[4..].as_ptr());
+            let h4 = vld1q_f32(self.low_pass[8..].as_ptr());
             let g0 = vld1q_f32(self.high_pass.as_ptr());
-            let g2 = vld1q_f32(self.high_pass.get_unchecked(4..).as_ptr());
-            let g4 = vld1q_f32(self.high_pass.get_unchecked(8..).as_ptr());
+            let g2 = vld1q_f32(self.high_pass[4..].as_ptr());
+            let g4 = vld1q_f32(self.high_pass[8..].as_ptr());
 
             let interpolation = BorderInterpolation::new(self.border_mode, 0, input.len() as isize);
 
@@ -180,8 +180,8 @@ impl DwtForwardExecutor<f32> for NeonWavelet12TapsF32 {
                 processed += 2;
             }
 
-            let approx = approx.chunks_exact_mut(2).into_remainder();
-            let details = details.chunks_exact_mut(2).into_remainder();
+            let approx = approx.as_chunks_mut::<2>().1;
+            let details = details.as_chunks_mut::<2>().1;
 
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
                 let base = 2 * (i + processed);
@@ -297,15 +297,15 @@ impl DwtInverseExecutor<f32> for NeonWavelet12TapsF32 {
                 }
 
                 let h0 = vld1q_f32(self.low_pass.as_ptr());
-                let h2 = vld1q_f32(self.low_pass.get_unchecked(4..).as_ptr());
-                let h4 = vld1q_f32(self.low_pass.get_unchecked(8..).as_ptr());
+                let h2 = vld1q_f32(self.low_pass[4..].as_ptr());
+                let h4 = vld1q_f32(self.low_pass[8..].as_ptr());
                 let g0 = vld1q_f32(self.high_pass.as_ptr());
-                let g2 = vld1q_f32(self.high_pass.get_unchecked(4..).as_ptr());
-                let g4 = vld1q_f32(self.high_pass.get_unchecked(8..).as_ptr());
+                let g2 = vld1q_f32(self.high_pass[4..].as_ptr());
+                let g4 = vld1q_f32(self.high_pass[8..].as_ptr());
 
                 let mut ui = safe_start;
 
-                while ui + 4 < safe_end {
+                while ui + 4 <= safe_end {
                     let (h, g) = (
                         vld1q_f32(approx.get_unchecked(ui)),
                         vld1q_f32(details.get_unchecked(ui)),

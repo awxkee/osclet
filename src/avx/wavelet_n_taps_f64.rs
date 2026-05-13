@@ -146,7 +146,7 @@ impl AvxWaveletNTapsF64 {
 
                 let mut u = 0usize;
 
-                while u + 4 < self.filter_length {
+                while u + 4 <= self.filter_length {
                     let q0 = _mm256_loadu_pd(input.get_unchecked(u..).as_ptr());
                     let q2 = _mm_loadu_pd(input.get_unchecked(u + 4..).as_ptr());
 

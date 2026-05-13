@@ -124,7 +124,7 @@ impl DwtForwardExecutor<f32> for NeonWaveletNTapsF32 {
 
                 let mut u = 0usize;
 
-                while u + 4 < self.filter_length {
+                while u + 4 <= self.filter_length {
                     let q0 = vld1q_f32(input.get_unchecked(u..).as_ptr());
                     let q2 = vld1q_f32(input.get_unchecked(u + 4..).as_ptr());
                     let pq2 = vld1_f32(input.get_unchecked(u + 8..).as_ptr());
@@ -195,7 +195,7 @@ impl DwtForwardExecutor<f32> for NeonWaveletNTapsF32 {
 
                 let mut u = 0usize;
 
-                while u + 4 < self.filter_length {
+                while u + 4 <= self.filter_length {
                     let q0 = vld1q_f32(input.get_unchecked(u..).as_ptr());
                     let pq1 = vld1_f32(input.get_unchecked(u + 4..).as_ptr());
 
@@ -374,14 +374,16 @@ impl DwtInverseExecutor<f32> for NeonWaveletNTapsF32 {
 
                     for ((wg, wh), dst) in self
                         .high_pass
-                        .chunks_exact(16)
-                        .zip(self.low_pass.chunks_exact(16))
-                        .zip(part.chunks_exact_mut(16))
+                        .as_chunks::<16>()
+                        .0
+                        .iter()
+                        .zip(self.low_pass.as_chunks::<16>().0.iter())
+                        .zip(part.as_chunks_mut::<16>().0.iter_mut())
                     {
                         let xw0 = vld1q_f32(dst.as_ptr());
-                        let xw1 = vld1q_f32(dst.get_unchecked(4..).as_ptr());
-                        let xw2 = vld1q_f32(dst.get_unchecked(8..).as_ptr());
-                        let xw3 = vld1q_f32(dst.get_unchecked(12..).as_ptr());
+                        let xw1 = vld1q_f32(dst[4..].as_ptr());
+                        let xw2 = vld1q_f32(dst[8..].as_ptr());
+                        let xw3 = vld1q_f32(dst[12..].as_ptr());
 
                         let q0 = vfmaq_n_f32(
                             vfmaq_n_f32(xw0, vld1q_f32(wh.as_ptr()), h),
@@ -389,35 +391,37 @@ impl DwtInverseExecutor<f32> for NeonWaveletNTapsF32 {
                             g,
                         );
                         let q1 = vfmaq_n_f32(
-                            vfmaq_n_f32(xw1, vld1q_f32(wh.get_unchecked(4..).as_ptr()), h),
-                            vld1q_f32(wg.get_unchecked(4..).as_ptr()),
+                            vfmaq_n_f32(xw1, vld1q_f32(wh[4..].as_ptr()), h),
+                            vld1q_f32(wg[4..].as_ptr()),
                             g,
                         );
                         let q2 = vfmaq_n_f32(
-                            vfmaq_n_f32(xw2, vld1q_f32(wh.get_unchecked(8..).as_ptr()), h),
-                            vld1q_f32(wg.get_unchecked(8..).as_ptr()),
+                            vfmaq_n_f32(xw2, vld1q_f32(wh[8..].as_ptr()), h),
+                            vld1q_f32(wg[8..].as_ptr()),
                             g,
                         );
                         let q3 = vfmaq_n_f32(
-                            vfmaq_n_f32(xw3, vld1q_f32(wh.get_unchecked(12..).as_ptr()), h),
-                            vld1q_f32(wg.get_unchecked(12..).as_ptr()),
+                            vfmaq_n_f32(xw3, vld1q_f32(wh[12..].as_ptr()), h),
+                            vld1q_f32(wg[12..].as_ptr()),
                             g,
                         );
 
                         vst1q_f32(dst.as_mut_ptr(), q0);
-                        vst1q_f32(dst.get_unchecked_mut(4..).as_mut_ptr(), q1);
-                        vst1q_f32(dst.get_unchecked_mut(8..).as_mut_ptr(), q2);
-                        vst1q_f32(dst.get_unchecked_mut(12..).as_mut_ptr(), q3);
+                        vst1q_f32(dst[4..].as_mut_ptr(), q1);
+                        vst1q_f32(dst[8..].as_mut_ptr(), q2);
+                        vst1q_f32(dst[12..].as_mut_ptr(), q3);
                     }
 
-                    let part = part.chunks_exact_mut(16).into_remainder();
-                    let high_pass = self.high_pass.chunks_exact(16).remainder();
-                    let low_pass = self.low_pass.chunks_exact(16).remainder();
+                    let part = part.as_chunks_mut::<16>().1;
+                    let high_pass = self.high_pass.as_chunks::<16>().1;
+                    let low_pass = self.low_pass.as_chunks::<16>().1;
 
                     for ((wg, wh), dst) in high_pass
-                        .chunks_exact(4)
-                        .zip(low_pass.chunks_exact(4))
-                        .zip(part.chunks_exact_mut(4))
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .zip(low_pass.as_chunks::<4>().0.iter())
+                        .zip(part.as_chunks_mut::<4>().0.iter_mut())
                     {
                         let xw0 = vld1q_f32(dst.as_ptr());
                         let q0 = vfmaq_n_f32(
@@ -428,9 +432,9 @@ impl DwtInverseExecutor<f32> for NeonWaveletNTapsF32 {
                         vst1q_f32(dst.as_mut_ptr(), q0);
                     }
 
-                    let part = part.chunks_exact_mut(4).into_remainder();
-                    let high_pass = self.high_pass.chunks_exact(4).remainder();
-                    let low_pass = self.low_pass.chunks_exact(4).remainder();
+                    let part = part.as_chunks_mut::<4>().1;
+                    let high_pass = high_pass.as_chunks::<4>().1;
+                    let low_pass = low_pass.as_chunks::<4>().1;
 
                     for ((&wg, &wh), dst) in
                         high_pass.iter().zip(low_pass.iter()).zip(part.iter_mut())

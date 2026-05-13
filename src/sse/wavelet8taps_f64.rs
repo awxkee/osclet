@@ -346,7 +346,7 @@ impl SseWavelet8TapsF64 {
 
                 let mut ui = safe_start;
 
-                while ui + 2 < safe_end {
+                while ui + 2 <= safe_end {
                     let (h, g) = (
                         SseVectorD::load(approx.get_unchecked(ui..)),
                         SseVectorD::load(details.get_unchecked(ui..)),
@@ -365,7 +365,7 @@ impl SseWavelet8TapsF64 {
                     let w0 = g0.mul_add(wg0, h0.mul_add(wh0, q0));
                     let w1 = g1.mul_add(wg0, h1.mul_add(wh0, q1));
                     let w2 = g2.mul_add(wg0, h2.mul_add(wh0, q2));
-                    let w3 = g2.mul_add(wg0, h2.mul_add(wh0, q3));
+                    let w3 = g3.mul_add(wg0, h3.mul_add(wh0, q3));
 
                     let wh1 = h.duplicate_hi();
                     let wg1 = g.duplicate_hi();
@@ -373,7 +373,7 @@ impl SseWavelet8TapsF64 {
                     let w4 = g0.mul_add(wg1, h0.mul_add(wh1, w1));
                     let w5 = g1.mul_add(wg1, h1.mul_add(wh1, w2));
                     let w6 = g2.mul_add(wg1, h2.mul_add(wh1, w3));
-                    let w7 = g2.mul_add(wg1, h2.mul_add(wh1, q4));
+                    let w7 = g3.mul_add(wg1, h3.mul_add(wh1, q4));
 
                     w0.write(part0);
                     w4.write(part0.get_unchecked_mut(2..));

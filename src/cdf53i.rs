@@ -396,43 +396,42 @@ macro_rules! define_integer_cdf {
 
                     self.execute_forward(signal, &mut approx, &mut details)?;
 
-                    Ok(MultiDwt {
+                    return Ok(MultiDwt {
                         levels: vec![Dwt {
                             approximations: approx,
                             details,
                         }],
-                    })
-                } else {
-                    let mut current_signal = signal.to_vec();
-                    let mut approx;
-                    let mut details;
+                    });
+                }
 
-                    let mut levels_store = Vec::with_capacity(levels);
+                let mut current_signal = signal.to_vec();
+                let mut approx = try_vec![T::default(); signal.len().div_ceil(2)];
+                let mut levels_store = Vec::with_capacity(levels);
 
-                    for _ in 0..levels {
-                        if current_signal.len() < $min_taps {
-                            return Err(OscletError::BufferWasTooSmallForLevel);
-                        }
-
-                        approx = try_vec![T::default(); current_signal.len().div_ceil(2)];
-                        details = try_vec![T::default(); current_signal.len() / 2];
-
-                        // Forward DWT on current signal
-                        self.execute_forward(&current_signal, &mut approx, &mut details)?;
-
-                        // Next level uses only the approximation
-                        current_signal = approx.to_vec();
-
-                        levels_store.push(Dwt {
-                            approximations: approx,
-                            details,
-                        });
+                for _ in 0..levels {
+                    if current_signal.len() < $min_taps {
+                        return Err(OscletError::BufferWasTooSmallForLevel);
                     }
 
-                    Ok(MultiDwt {
-                        levels: levels_store,
-                    })
+                    let approx_len = current_signal.len().div_ceil(2);
+                    let details_len = current_signal.len() / 2;
+
+                    approx.resize(approx_len, T::default());
+                    let mut details = try_vec![T::default(); details_len];
+
+                    self.execute_forward(&current_signal, &mut approx, &mut details)?;
+
+                    std::mem::swap(&mut current_signal, &mut approx);
+
+                    levels_store.push(Dwt {
+                        approximations: current_signal.clone(),
+                        details,
+                    });
                 }
+
+                Ok(MultiDwt {
+                    levels: levels_store,
+                })
             }
 
             fn idwt(&self, dwt: &DwtRef<'_, T>) -> Result<Vec<T>, OscletError> {

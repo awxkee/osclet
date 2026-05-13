@@ -253,7 +253,7 @@ impl SseWavelet2TapsF64 {
 
                 let mut uq = safe_start;
                 //
-                while uq + 2 < safe_end {
+                while uq + 2 <= safe_end {
                     let (h, g) = (
                         SseVectorD::load(approx.get_unchecked(uq..)),
                         SseVectorD::load(details.get_unchecked(uq..)),

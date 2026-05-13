@@ -54,7 +54,7 @@ jobs:
         with:
           version: "latest"
       - name: Run test suites with wasm-pack
-        run: wasm-pack test --node --features wasm
+        run: wasm-pack test --node
 
   tests_arm:
     name: Tests

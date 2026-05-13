@@ -42,7 +42,7 @@ impl NeonConvolution1dF64 {
     fn convolve_4taps(&self, arena: &[f64], output: &mut [f64], kernel: &[f64; 4]) {
         unsafe {
             let c0 = vld1q_f64(kernel.as_ptr().cast());
-            let c1 = vld1q_f64(kernel.get_unchecked(2..).as_ptr().cast());
+            let c1 = vld1q_f64(kernel[2..].as_ptr().cast());
 
             let mut p = output.chunks_exact_mut(8).len() * 8;
 
@@ -145,8 +145,8 @@ impl NeonConvolution1dF64 {
     fn convolve_6taps(&self, arena: &[f64], output: &mut [f64], kernel: &[f64; 6]) {
         unsafe {
             let c0 = vld1q_f64(kernel.as_ptr());
-            let c2 = vld1q_f64(kernel.get_unchecked(2..).as_ptr());
-            let c4 = vld1q_f64(kernel.get_unchecked(4..).as_ptr());
+            let c2 = vld1q_f64(kernel[2..].as_ptr());
+            let c4 = vld1q_f64(kernel[4..].as_ptr());
 
             let mut p = output.chunks_exact_mut(8).len() * 8;
 
@@ -257,9 +257,9 @@ impl NeonConvolution1dF64 {
     fn convolve_8taps(&self, arena: &[f64], output: &mut [f64], kernel: &[f64; 8]) {
         unsafe {
             let c0 = vld1q_f64(kernel.as_ptr());
-            let c2 = vld1q_f64(kernel.get_unchecked(2..).as_ptr());
-            let c4 = vld1q_f64(kernel.get_unchecked(4..).as_ptr());
-            let c6 = vld1q_f64(kernel.get_unchecked(6..).as_ptr());
+            let c2 = vld1q_f64(kernel[2..].as_ptr());
+            let c4 = vld1q_f64(kernel[4..].as_ptr());
+            let c6 = vld1q_f64(kernel[6..].as_ptr());
 
             let mut p = output.chunks_exact_mut(8).len() * 8;
 
@@ -452,7 +452,7 @@ impl Convolve1d<f64> for NeonConvolution1dF64 {
 
                 let mut f = 1usize;
 
-                while f + 4 < filter_size {
+                while f + 4 <= filter_size {
                     let c0 = vld1q_f64(kernel.get_unchecked(f..).as_ptr());
                     let c1 = vld1q_f64(kernel.get_unchecked(f + 2..).as_ptr());
                     macro_rules! step {

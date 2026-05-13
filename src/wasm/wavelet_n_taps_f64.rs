@@ -146,7 +146,7 @@ impl WasmWaveletNTapsF64 {
 
                 let mut u = 0usize;
 
-                while u + 4 < self.filter_length {
+                while u + 4 <= self.filter_length {
                     let q0 = WasmVectorD::load(input.get_unchecked(u..));
                     let q1 = WasmVectorD::load(input.get_unchecked(u + 2..));
                     let q2 = WasmVectorD::load(input.get_unchecked(u + 4..));

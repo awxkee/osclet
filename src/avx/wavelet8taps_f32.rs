@@ -318,7 +318,7 @@ impl AvxWavelet8TapsF32 {
 
                 let mut ui = safe_start;
 
-                while ui + 4 < safe_end {
+                while ui + 4 <= safe_end {
                     let (h, g) = (
                         _mm_loadu_ps(approx.get_unchecked(ui)),
                         _mm_loadu_ps(details.get_unchecked(ui)),

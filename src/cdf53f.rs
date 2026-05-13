@@ -323,43 +323,42 @@ macro_rules! define_dwt_cdf_float {
 
                     self.execute_forward(signal, &mut approx, &mut details)?;
 
-                    Ok(MultiDwt {
+                    return Ok(MultiDwt {
                         levels: vec![Dwt {
                             approximations: approx,
                             details,
                         }],
-                    })
-                } else {
-                    let mut current_signal = signal.to_vec();
-                    let mut approx;
-                    let mut details;
+                    });
+                }
 
-                    let mut levels_store = Vec::with_capacity(levels);
+                let mut current_signal = signal.to_vec();
+                let mut approx = try_vec![T::default(); signal.len().div_ceil(2)];
+                let mut levels_store = Vec::with_capacity(levels);
 
-                    for _ in 0..levels {
-                        if current_signal.len() < $min_size {
-                            return Err(OscletError::BufferWasTooSmallForLevel);
-                        }
-
-                        approx = try_vec![T::default(); current_signal.len().div_ceil(2)];
-                        details = try_vec![T::default(); current_signal.len() / 2];
-
-                        // Forward DWT on current signal
-                        self.execute_forward(&current_signal, &mut approx, &mut details)?;
-
-                        // Next level uses only the approximation
-                        current_signal = approx.to_vec();
-
-                        levels_store.push(Dwt {
-                            approximations: approx,
-                            details,
-                        });
+                for _ in 0..levels {
+                    if current_signal.len() < $min_size {
+                        return Err(OscletError::BufferWasTooSmallForLevel);
                     }
 
-                    Ok(MultiDwt {
-                        levels: levels_store,
-                    })
+                    let approx_len = current_signal.len().div_ceil(2);
+                    let details_len = current_signal.len() / 2;
+
+                    approx.resize(approx_len, T::default());
+                    let mut details = try_vec![T::default(); details_len];
+
+                    self.execute_forward(&current_signal, &mut approx, &mut details)?;
+
+                    std::mem::swap(&mut current_signal, &mut approx);
+
+                    levels_store.push(Dwt {
+                        approximations: current_signal.clone(),
+                        details,
+                    });
                 }
+
+                Ok(MultiDwt {
+                    levels: levels_store,
+                })
             }
 
             fn idwt(&self, dwt: &DwtRef<'_, T>) -> Result<Vec<T>, OscletError> {
@@ -506,5 +505,48 @@ mod tests {
             phantom0: Default::default(),
         };
         _ = i16_cdf53.multi_dwt(&input, 4).unwrap();
+    }
+
+    #[test]
+    fn test_cdf97_multilevel() {
+        let m_cdf97 = Cdf53::<f32> {
+            phantom0: Default::default(),
+        };
+        let o_signal = vec![
+            1, 55, 523, 40, 8, 32, 45, 166, 52, 63, 13, 255, 63, 42, 32, 12, 52, 54, 23, 125, 23,
+            255, 43, 23, 123, 54, 34, 255, 255, 23, 255, 32, 13, 15, 65, 23, 5, 7, 7, 3, 9, 1,
+        ]
+        .iter()
+        .map(|&x| x as f32)
+        .collect::<Vec<_>>();
+
+        for levels in 1..=4 {
+            let multi = m_cdf97.multi_dwt(&o_signal, levels).unwrap();
+
+            let refs: Vec<&[f32]> = multi.levels.iter().map(|d| d.details.as_slice()).collect();
+            let restored = m_cdf97
+                .multi_idwt(&MultiLevelDwtRef {
+                    approximations: multi.levels.last().unwrap().approximations.as_slice(),
+                    details: refs,
+                })
+                .unwrap();
+
+            assert_eq!(
+                restored.len(),
+                o_signal.len(),
+                "levels={levels}: restored length mismatch"
+            );
+            o_signal
+                .iter()
+                .zip(restored.iter())
+                .enumerate()
+                .for_each(|(idx, (o, re))| {
+                    assert!(
+                        (o - re).abs() < 1e-3,
+                        "levels={levels} idx={idx}: original={o}, restored={re}, diff={}",
+                        (o - re).abs()
+                    );
+                });
+        }
     }
 }

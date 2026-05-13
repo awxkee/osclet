@@ -87,9 +87,9 @@ impl DwtForwardExecutor<f32> for NeonWavelet8TapsF32 {
 
         unsafe {
             let h = vld1q_f32(self.low_pass.as_ptr());
-            let h2 = vld1q_f32(self.low_pass.get_unchecked(4..).as_ptr());
+            let h2 = vld1q_f32(self.low_pass[4..].as_ptr());
             let g = vld1q_f32(self.high_pass.as_ptr());
-            let g2 = vld1q_f32(self.high_pass.get_unchecked(4..).as_ptr());
+            let g2 = vld1q_f32(self.high_pass[4..].as_ptr());
 
             let interpolation = BorderInterpolation::new(self.border_mode, 0, input.len() as isize);
 
@@ -288,7 +288,7 @@ impl DwtInverseExecutor<f32> for NeonWavelet8TapsF32 {
 
                 let mut ui = safe_start;
 
-                while ui + 4 < safe_end {
+                while ui + 4 <= safe_end {
                     let (h, g) = (
                         vld1q_f32(approx.get_unchecked(ui)),
                         vld1q_f32(details.get_unchecked(ui)),
@@ -340,7 +340,7 @@ impl DwtInverseExecutor<f32> for NeonWavelet8TapsF32 {
                     ui += 4;
                 }
 
-                while ui + 2 < safe_end {
+                while ui + 2 <= safe_end {
                     let (h, g) = (
                         vld1_f32(approx.get_unchecked(ui)),
                         vld1_f32(details.get_unchecked(ui)),

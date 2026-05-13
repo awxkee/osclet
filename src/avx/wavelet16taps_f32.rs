@@ -113,8 +113,8 @@ impl AvxWavelet16TapsF32 {
             let h0 = _mm256_loadu_ps(self.low_pass.as_ptr());
             let g0 = _mm256_loadu_ps(self.high_pass.as_ptr());
 
-            let h8 = _mm256_loadu_ps(self.low_pass.get_unchecked(8..).as_ptr());
-            let g8 = _mm256_loadu_ps(self.high_pass.get_unchecked(8..).as_ptr());
+            let h8 = _mm256_loadu_ps(self.low_pass[8..].as_ptr());
+            let g8 = _mm256_loadu_ps(self.high_pass[8..].as_ptr());
 
             let interpolation = BorderInterpolation::new(self.border_mode, 0, input.len() as isize);
 
@@ -294,12 +294,12 @@ impl AvxWavelet16TapsF32 {
                 let h0 = _mm256_loadu_ps(self.low_pass.as_ptr());
                 let g0 = _mm256_loadu_ps(self.high_pass.as_ptr());
 
-                let h8 = _mm256_loadu_ps(self.low_pass.get_unchecked(8..).as_ptr());
-                let g8 = _mm256_loadu_ps(self.high_pass.get_unchecked(8..).as_ptr());
+                let h8 = _mm256_loadu_ps(self.low_pass[8..].as_ptr());
+                let g8 = _mm256_loadu_ps(self.high_pass[8..].as_ptr());
 
                 let mut ui = safe_start;
 
-                while ui + 4 < safe_end {
+                while ui + 4 <= safe_end {
                     let (h, g) = (
                         _mm_loadu_ps(approx.get_unchecked(ui)),
                         _mm_loadu_ps(details.get_unchecked(ui)),

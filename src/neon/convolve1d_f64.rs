@@ -44,9 +44,9 @@ impl NeonConvolution1dF64 {
             let c0 = vld1q_f64(kernel.as_ptr().cast());
             let c1 = vld1q_f64(kernel[2..].as_ptr().cast());
 
-            let mut p = output.chunks_exact_mut(8).len() * 8;
+            let mut p = output.as_chunks_mut::<8>().0.iter_mut().len() * 8;
 
-            for (x, dst) in output.chunks_exact_mut(8).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<8>().0.iter_mut().enumerate() {
                 let zx = x * 8;
                 let shifted_src = arena.get_unchecked(zx..);
 
@@ -93,9 +93,9 @@ impl NeonConvolution1dF64 {
                 vst1q_f64(dst.get_unchecked_mut(6..).as_mut_ptr(), k3);
             }
 
-            let output = output.chunks_exact_mut(8).into_remainder();
+            let output = output.as_chunks_mut::<8>().1;
 
-            for (x, dst) in output.chunks_exact_mut(4).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                 let zx = x * 4;
                 let shifted_src = arena.get_unchecked(p + zx..);
 
@@ -126,8 +126,8 @@ impl NeonConvolution1dF64 {
                 vst1q_f64(dst.get_unchecked_mut(2..).as_mut_ptr(), k1);
             }
 
-            p += output.chunks_exact_mut(4).len() * 4;
-            let output = output.chunks_exact_mut(4).into_remainder();
+            p += output.as_chunks_mut::<4>().0.iter_mut().len() * 4;
+            let output = output.as_chunks_mut::<4>().1;
 
             for (x, dst) in output.iter_mut().enumerate() {
                 let shifted_src = arena.get_unchecked(p + x..);
@@ -148,9 +148,9 @@ impl NeonConvolution1dF64 {
             let c2 = vld1q_f64(kernel[2..].as_ptr());
             let c4 = vld1q_f64(kernel[4..].as_ptr());
 
-            let mut p = output.chunks_exact_mut(8).len() * 8;
+            let mut p = output.as_chunks_mut::<8>().0.iter_mut().len() * 8;
 
-            for (x, dst) in output.chunks_exact_mut(8).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<8>().0.iter_mut().enumerate() {
                 let zx = x * 8;
                 let shifted_src = arena.get_unchecked(zx..);
 
@@ -199,9 +199,9 @@ impl NeonConvolution1dF64 {
                 vst1q_f64(dst.get_unchecked_mut(6..).as_mut_ptr(), k3);
             }
 
-            let output = output.chunks_exact_mut(8).into_remainder();
+            let output = output.as_chunks_mut::<8>().1;
 
-            for (x, dst) in output.chunks_exact_mut(4).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                 let zx = x * 4;
                 let shifted_src = arena.get_unchecked(p + zx..);
 
@@ -234,8 +234,8 @@ impl NeonConvolution1dF64 {
                 vst1q_f64(dst.get_unchecked_mut(2..).as_mut_ptr(), k1);
             }
 
-            p += output.chunks_exact_mut(4).len() * 4;
-            let output = output.chunks_exact_mut(4).into_remainder();
+            p += output.as_chunks_mut::<4>().0.iter_mut().len() * 4;
+            let output = output.as_chunks_mut::<4>().1;
 
             for (x, dst) in output.iter_mut().enumerate() {
                 let shifted_src = arena.get_unchecked(p + x..);
@@ -261,9 +261,9 @@ impl NeonConvolution1dF64 {
             let c4 = vld1q_f64(kernel[4..].as_ptr());
             let c6 = vld1q_f64(kernel[6..].as_ptr());
 
-            let mut p = output.chunks_exact_mut(8).len() * 8;
+            let mut p = output.as_chunks_mut::<8>().0.iter_mut().len() * 8;
 
-            for (x, dst) in output.chunks_exact_mut(8).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<8>().0.iter_mut().enumerate() {
                 let zx = x * 8;
                 let shifted_src = arena.get_unchecked(zx..);
 
@@ -314,9 +314,9 @@ impl NeonConvolution1dF64 {
                 vst1q_f64(dst.get_unchecked_mut(6..).as_mut_ptr(), k3);
             }
 
-            let output = output.chunks_exact_mut(8).into_remainder();
+            let output = output.as_chunks_mut::<8>().1;
 
-            for (x, dst) in output.chunks_exact_mut(4).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                 let zx = x * 4;
                 let shifted_src = arena.get_unchecked(p + zx..);
 
@@ -351,8 +351,8 @@ impl NeonConvolution1dF64 {
                 vst1q_f64(dst.get_unchecked_mut(2..).as_mut_ptr(), k1);
             }
 
-            p += output.chunks_exact_mut(4).len() * 4;
-            let output = output.chunks_exact_mut(4).into_remainder();
+            p += output.as_chunks_mut::<4>().0.iter_mut().len() * 4;
+            let output = output.as_chunks_mut::<4>().1;
 
             for (x, dst) in output.iter_mut().enumerate() {
                 let shifted_src = arena.get_unchecked(p + x..);
@@ -439,9 +439,9 @@ impl Convolve1d<f64> for NeonConvolution1dF64 {
         unsafe {
             let c0 = vdupq_n_f64(*kernel.get_unchecked(0));
 
-            let mut p = output.chunks_exact_mut(8).len() * 8;
+            let mut p = output.as_chunks_mut::<8>().0.iter_mut().len() * 8;
 
-            for (x, dst) in output.chunks_exact_mut(8).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<8>().0.iter_mut().enumerate() {
                 let zx = x * 8;
                 let shifted_src = arena.get_unchecked(zx..);
 
@@ -516,9 +516,9 @@ impl Convolve1d<f64> for NeonConvolution1dF64 {
                 vst1q_f64(dst.get_unchecked_mut(6..).as_mut_ptr(), k3);
             }
 
-            let output = output.chunks_exact_mut(8).into_remainder();
+            let output = output.as_chunks_mut::<8>().1;
 
-            for (x, dst) in output.chunks_exact_mut(4).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                 let zx = x * 4;
                 let shifted_src = arena.get_unchecked(p + zx..);
 
@@ -543,8 +543,8 @@ impl Convolve1d<f64> for NeonConvolution1dF64 {
                 vst1q_f64(dst.get_unchecked_mut(2..).as_mut_ptr(), k1);
             }
 
-            p += output.chunks_exact_mut(4).len() * 4;
-            let output = output.chunks_exact_mut(4).into_remainder();
+            p += output.as_chunks_mut::<4>().0.iter_mut().len() * 4;
+            let output = output.as_chunks_mut::<4>().1;
 
             let c0 = *kernel.get_unchecked(0);
 

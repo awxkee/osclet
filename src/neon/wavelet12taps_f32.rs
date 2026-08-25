@@ -307,8 +307,8 @@ impl DwtInverseExecutor<f32> for NeonWavelet12TapsF32 {
 
                 while ui + 4 <= safe_end {
                     let (h, g) = (
-                        vld1q_f32(approx.get_unchecked(ui)),
-                        vld1q_f32(details.get_unchecked(ui)),
+                        vld1q_f32(approx.get_unchecked(ui..).as_ptr()),
+                        vld1q_f32(details.get_unchecked(ui..).as_ptr()),
                     );
 
                     let k = 2 * ui as isize - FILTER_OFFSET as isize;

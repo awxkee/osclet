@@ -119,10 +119,10 @@ impl DwtForwardExecutor<f64> for NeonWavelet2TapsF64 {
                 vst1q_f64(detail.as_mut_ptr(), vpaddq_f64(d0, d1));
             }
 
-            let processed = 2 * approx.chunks_exact_mut(2).len() * 2;
+            let processed = 2 * approx.as_chunks_mut::<2>().0.iter_mut().len() * 2;
 
-            let approx = approx.chunks_exact_mut(2).into_remainder();
-            let details = details.chunks_exact_mut(2).into_remainder();
+            let approx = approx.as_chunks_mut::<2>().1;
+            let details = details.as_chunks_mut::<2>().1;
 
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
                 let base = processed + 2 * i;
@@ -589,6 +589,7 @@ impl IncompleteDwtExecutor<f32> for NeonWavelet2TapsF32 {
 }
 
 #[cfg(test)]
+#[allow(clippy::approx_constant)]
 mod tests {
     use super::*;
     use crate::{DaubechiesFamily, WaveletFilterProvider};

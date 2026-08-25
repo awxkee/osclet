@@ -252,11 +252,7 @@ mod tests {
         ];
         let db4 = WaveletNTaps::new(
             BorderMode::Wrap,
-            DaubechiesFamily::Db6
-                .get_wavelet()
-                .as_ref()
-                .try_into()
-                .unwrap(),
+            DaubechiesFamily::Db6.get_wavelet().as_ref(),
         );
         let out_length = dwt_length(input.len(), 12);
         let mut approx = vec![0.0; out_length];
@@ -334,11 +330,7 @@ mod tests {
         ];
         let db4 = WaveletNTaps::new(
             BorderMode::Wrap,
-            DaubechiesFamily::Db6
-                .get_wavelet()
-                .as_ref()
-                .try_into()
-                .unwrap(),
+            DaubechiesFamily::Db6.get_wavelet().as_ref(),
         );
         let out_length = dwt_length(input.len(), 12);
         let mut approx = vec![0.0; out_length];

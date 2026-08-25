@@ -170,8 +170,8 @@ impl DwtForwardExecutor<f32> for NeonWaveletNTapsF32 {
                 processed += 4;
             }
 
-            let approx = approx.chunks_exact_mut(4).into_remainder();
-            let details = details.chunks_exact_mut(4).into_remainder();
+            let approx = approx.as_chunks_mut::<4>().1;
+            let details = details.as_chunks_mut::<4>().1;
             let padded_input = padded_input.get_unchecked(processed * 2..);
 
             processed = 0usize;
@@ -237,8 +237,8 @@ impl DwtForwardExecutor<f32> for NeonWaveletNTapsF32 {
                 processed += 2;
             }
 
-            let approx = approx.chunks_exact_mut(2).into_remainder();
-            let details = details.chunks_exact_mut(2).into_remainder();
+            let approx = approx.as_chunks_mut::<2>().1;
+            let details = details.as_chunks_mut::<2>().1;
             let padded_input = padded_input.get_unchecked(processed * 2..);
 
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
@@ -249,9 +249,11 @@ impl DwtForwardExecutor<f32> for NeonWaveletNTapsF32 {
                 let input = padded_input.get_unchecked(base..base + self.filter_length);
 
                 for ((src, g), h) in input
-                    .chunks_exact(16)
-                    .zip(self.high_pass.chunks_exact(16))
-                    .zip(self.low_pass.chunks_exact(16))
+                    .as_chunks::<16>()
+                    .0
+                    .iter()
+                    .zip(self.high_pass.as_chunks::<16>().0.iter())
+                    .zip(self.low_pass.as_chunks::<16>().0.iter())
                 {
                     let q0 = vld1q_f32(src.as_ptr());
                     let q1 = vld1q_f32(src.get_unchecked(4..).as_ptr());
@@ -271,14 +273,16 @@ impl DwtForwardExecutor<f32> for NeonWaveletNTapsF32 {
                     d = vfmaq_f32(d, vld1q_f32(g.get_unchecked(12..).as_ptr()), q3);
                 }
 
-                let input = input.chunks_exact(16).remainder();
-                let high_pass = self.high_pass.chunks_exact(16).remainder();
-                let low_pass = self.low_pass.chunks_exact(16).remainder();
+                let input = input.as_chunks::<16>().1;
+                let high_pass = self.high_pass.as_chunks::<16>().1;
+                let low_pass = self.low_pass.as_chunks::<16>().1;
 
                 for ((src, g), h) in input
-                    .chunks_exact(4)
-                    .zip(high_pass.chunks_exact(4))
-                    .zip(low_pass.chunks_exact(4))
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(high_pass.as_chunks::<4>().0.iter())
+                    .zip(low_pass.as_chunks::<4>().0.iter())
                 {
                     let q0 = vld1q_f32(src.as_ptr());
 
@@ -286,9 +290,9 @@ impl DwtForwardExecutor<f32> for NeonWaveletNTapsF32 {
                     d = vfmaq_f32(d, vld1q_f32(g.as_ptr()), q0);
                 }
 
-                let input = input.chunks_exact(4).remainder();
-                let high_pass = high_pass.chunks_exact(4).remainder();
-                let low_pass = low_pass.chunks_exact(4).remainder();
+                let input = input.as_chunks::<4>().1;
+                let high_pass = high_pass.as_chunks::<4>().1;
+                let low_pass = low_pass.as_chunks::<4>().1;
 
                 let mut a = vpadds_f32(vadd_f32(vget_low_f32(a), vget_high_f32(a)));
                 let mut d = vpadds_f32(vadd_f32(vget_low_f32(d), vget_high_f32(d)));
@@ -487,11 +491,7 @@ mod tests {
         ];
         let db4 = NeonWaveletNTapsF32::new(
             BorderMode::Wrap,
-            DaubechiesFamily::Db6
-                .get_wavelet()
-                .as_ref()
-                .try_into()
-                .unwrap(),
+            DaubechiesFamily::Db6.get_wavelet().as_ref(),
         );
         let out_length = dwt_length(input.len(), 12);
         let mut approx = vec![0.0; out_length];
@@ -569,11 +569,7 @@ mod tests {
         ];
         let db4 = NeonWaveletNTapsF32::new(
             BorderMode::Wrap,
-            DaubechiesFamily::Db6
-                .get_wavelet()
-                .as_ref()
-                .try_into()
-                .unwrap(),
+            DaubechiesFamily::Db6.get_wavelet().as_ref(),
         );
         let out_length = dwt_length(input.len(), 12);
         let mut approx = vec![0.0; out_length];

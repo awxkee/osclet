@@ -185,8 +185,8 @@ impl SseWaveletNTapsF64 {
                 processed += 2;
             }
 
-            let approx = approx.chunks_exact_mut(2).into_remainder();
-            let details = details.chunks_exact_mut(2).into_remainder();
+            let approx = approx.as_chunks_mut::<2>().1;
+            let details = details.as_chunks_mut::<2>().1;
             let padded_input = padded_input.get_unchecked(processed * 2..);
 
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
@@ -198,9 +198,11 @@ impl SseWaveletNTapsF64 {
                 let mut d = SseVectorD::zero();
 
                 for ((src, g), h) in input
-                    .chunks_exact(4)
-                    .zip(self.high_pass.chunks_exact(4))
-                    .zip(self.low_pass.chunks_exact(4))
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(self.high_pass.as_chunks::<4>().0.iter())
+                    .zip(self.low_pass.as_chunks::<4>().0.iter())
                 {
                     let q0 = SseVectorD::load(src);
                     let q1 = SseVectorD::load(src.get_unchecked(2..));
@@ -211,9 +213,9 @@ impl SseWaveletNTapsF64 {
                         .mul_add(q1, SseVectorD::load(g).mul_add(q0, d));
                 }
 
-                let input = input.chunks_exact(4).remainder();
-                let high_pass = self.high_pass.chunks_exact(4).remainder();
-                let low_pass = self.low_pass.chunks_exact(4).remainder();
+                let input = input.as_chunks::<4>().1;
+                let high_pass = self.high_pass.as_chunks::<4>().1;
+                let low_pass = self.low_pass.as_chunks::<4>().1;
 
                 let mut a = a.hsum();
                 let mut d = d.hsum();
@@ -303,9 +305,11 @@ impl SseWaveletNTapsF64 {
 
                     for ((wg, wh), dst) in self
                         .high_pass
-                        .chunks_exact(8)
-                        .zip(self.low_pass.chunks_exact(8))
-                        .zip(part.chunks_exact_mut(8))
+                        .as_chunks::<8>()
+                        .0
+                        .iter()
+                        .zip(self.low_pass.as_chunks::<8>().0.iter())
+                        .zip(part.as_chunks_mut::<8>().0.iter_mut())
                     {
                         let xw0 = SseVectorD::load(dst);
                         let xw1 = SseVectorD::load(dst.get_unchecked(2..));
@@ -327,14 +331,16 @@ impl SseWaveletNTapsF64 {
                         q3.write(dst.get_unchecked_mut(6..));
                     }
 
-                    let part = part.chunks_exact_mut(8).into_remainder();
-                    let high_pass = self.high_pass.chunks_exact(8).remainder();
-                    let low_pass = self.low_pass.chunks_exact(8).remainder();
+                    let part = part.as_chunks_mut::<8>().1;
+                    let high_pass = self.high_pass.as_chunks::<8>().1;
+                    let low_pass = self.low_pass.as_chunks::<8>().1;
 
                     for ((wg, wh), dst) in high_pass
-                        .chunks_exact(4)
-                        .zip(low_pass.chunks_exact(4))
-                        .zip(part.chunks_exact_mut(4))
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .zip(low_pass.as_chunks::<4>().0.iter())
+                        .zip(part.as_chunks_mut::<4>().0.iter_mut())
                     {
                         let xw0 = SseVectorD::load(dst);
                         let xw1 = SseVectorD::load(dst.get_unchecked(2..));
@@ -348,9 +354,9 @@ impl SseWaveletNTapsF64 {
                         q1.write(dst.get_unchecked_mut(2..));
                     }
 
-                    let part = part.chunks_exact_mut(4).into_remainder();
-                    let high_pass = high_pass.chunks_exact(4).remainder();
-                    let low_pass = low_pass.chunks_exact(4).remainder();
+                    let part = part.as_chunks_mut::<4>().1;
+                    let high_pass = high_pass.as_chunks::<4>().1;
+                    let low_pass = low_pass.as_chunks::<4>().1;
 
                     for ((wg, wh), dst) in
                         high_pass.iter().zip(low_pass.iter()).zip(part.iter_mut())
@@ -404,11 +410,7 @@ mod tests {
         ];
         let db4 = SseWaveletNTapsF64::new(
             BorderMode::Wrap,
-            DaubechiesFamily::Db6
-                .get_wavelet()
-                .as_ref()
-                .try_into()
-                .unwrap(),
+            DaubechiesFamily::Db6.get_wavelet().as_ref(),
         );
         let out_length = dwt_length(input.len(), 12);
         let mut approx = vec![0.0; out_length];
@@ -489,11 +491,7 @@ mod tests {
         ];
         let db4 = SseWaveletNTapsF64::new(
             BorderMode::Wrap,
-            DaubechiesFamily::Db6
-                .get_wavelet()
-                .as_ref()
-                .try_into()
-                .unwrap(),
+            DaubechiesFamily::Db6.get_wavelet().as_ref(),
         );
         let out_length = dwt_length(input.len(), 12);
         let mut approx = vec![0.0; out_length];

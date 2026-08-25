@@ -158,8 +158,8 @@ impl DwtForwardExecutor<f64> for NeonWaveletNTapsF64 {
                 processed += 2;
             }
 
-            let approx = approx.chunks_exact_mut(2).into_remainder();
-            let details = details.chunks_exact_mut(2).into_remainder();
+            let approx = approx.as_chunks_mut::<2>().1;
+            let details = details.as_chunks_mut::<2>().1;
             let padded_input = padded_input.get_unchecked(processed * 2..);
 
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
@@ -171,9 +171,11 @@ impl DwtForwardExecutor<f64> for NeonWaveletNTapsF64 {
                 let mut d = vdupq_n_f64(0.);
 
                 for ((src, g), h) in input
-                    .chunks_exact(4)
-                    .zip(self.high_pass.chunks_exact(4))
-                    .zip(self.low_pass.chunks_exact(4))
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(self.high_pass.as_chunks::<4>().0.iter())
+                    .zip(self.low_pass.as_chunks::<4>().0.iter())
                 {
                     let q0 = vld1q_f64(src.as_ptr());
                     let q1 = vld1q_f64(src.get_unchecked(2..).as_ptr());
@@ -190,9 +192,9 @@ impl DwtForwardExecutor<f64> for NeonWaveletNTapsF64 {
                     );
                 }
 
-                let input = input.chunks_exact(4).remainder();
-                let high_pass = self.high_pass.chunks_exact(4).remainder();
-                let low_pass = self.low_pass.chunks_exact(4).remainder();
+                let input = input.as_chunks::<4>().1;
+                let high_pass = self.high_pass.as_chunks::<4>().1;
+                let low_pass = self.low_pass.as_chunks::<4>().1;
 
                 let mut a = vpaddd_f64(a);
                 let mut d = vpaddd_f64(d);
@@ -321,9 +323,11 @@ impl DwtInverseExecutor<f64> for NeonWaveletNTapsF64 {
                     let low_pass = self.low_pass.as_chunks::<8>().1;
 
                     for ((wg, wh), dst) in high_pass
-                        .chunks_exact(4)
-                        .zip(low_pass.chunks_exact(4))
-                        .zip(part.chunks_exact_mut(4))
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .zip(low_pass.as_chunks::<4>().0.iter())
+                        .zip(part.as_chunks_mut::<4>().0.iter_mut())
                     {
                         let xw0 = vld1q_f64(dst.as_ptr());
                         let xw1 = vld1q_f64(dst.get_unchecked(2..).as_ptr());
@@ -343,9 +347,9 @@ impl DwtInverseExecutor<f64> for NeonWaveletNTapsF64 {
                         vst1q_f64(dst.get_unchecked_mut(2..).as_mut_ptr(), q1);
                     }
 
-                    let part = part.chunks_exact_mut(4).into_remainder();
-                    let high_pass = high_pass.chunks_exact(4).remainder();
-                    let low_pass = low_pass.chunks_exact(4).remainder();
+                    let part = part.as_chunks_mut::<4>().1;
+                    let high_pass = high_pass.as_chunks::<4>().1;
+                    let low_pass = low_pass.as_chunks::<4>().1;
 
                     for ((&wg, &wh), dst) in
                         high_pass.iter().zip(low_pass.iter()).zip(part.iter_mut())
@@ -398,11 +402,7 @@ mod tests {
         ];
         let db4 = NeonWaveletNTapsF64::new(
             BorderMode::Wrap,
-            DaubechiesFamily::Db6
-                .get_wavelet()
-                .as_ref()
-                .try_into()
-                .unwrap(),
+            DaubechiesFamily::Db6.get_wavelet().as_ref(),
         );
         let out_length = dwt_length(input.len(), 12);
         let mut approx = vec![0.0; out_length];
@@ -480,11 +480,7 @@ mod tests {
         ];
         let db4 = NeonWaveletNTapsF64::new(
             BorderMode::Wrap,
-            DaubechiesFamily::Db6
-                .get_wavelet()
-                .as_ref()
-                .try_into()
-                .unwrap(),
+            DaubechiesFamily::Db6.get_wavelet().as_ref(),
         );
         let out_length = dwt_length(input.len(), 12);
         let mut approx = vec![0.0; out_length];

@@ -240,8 +240,8 @@ where
             }
         }
 
-        let p = output.chunks_exact_mut(4).len() * 4;
-        let output = output.chunks_exact_mut(4).into_remainder();
+        let p = output.as_chunks_mut::<4>().0.iter_mut().len() * 4;
+        let output = output.as_chunks_mut::<4>().1;
 
         for (x, dst) in output.iter_mut().enumerate() {
             unsafe {

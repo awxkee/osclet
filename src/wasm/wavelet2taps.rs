@@ -141,10 +141,10 @@ impl WasmWavelet2TapsF64 {
                 d0.hadd(d1).write(detail);
             }
 
-            let processed = 2 * approx.chunks_exact_mut(2).len() * 2;
+            let processed = 2 * approx.as_chunks_mut::<2>().0.iter_mut().len() * 2;
 
-            let approx = approx.chunks_exact_mut(2).into_remainder();
-            let details = details.chunks_exact_mut(2).into_remainder();
+            let approx = approx.as_chunks_mut::<2>().1;
+            let details = details.as_chunks_mut::<2>().1;
 
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
                 let base = processed + 2 * i;
@@ -431,8 +431,8 @@ impl WasmWavelet2TapsF32 {
                 processed += 8;
             }
 
-            let approx = approx.chunks_exact_mut(8).into_remainder();
-            let details = details.chunks_exact_mut(8).into_remainder();
+            let approx = approx.as_chunks_mut::<8>().1;
+            let details = details.as_chunks_mut::<8>().1;
             let padded_input = input.get_unchecked(processed * 2..);
             processed = 0;
 
@@ -463,8 +463,8 @@ impl WasmWavelet2TapsF32 {
                 processed += 4;
             }
 
-            let approx = approx.chunks_exact_mut(4).into_remainder();
-            let details = details.chunks_exact_mut(4).into_remainder();
+            let approx = approx.as_chunks_mut::<4>().1;
+            let details = details.as_chunks_mut::<4>().1;
             let padded_input = padded_input.get_unchecked(processed * 2..);
 
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
@@ -630,6 +630,7 @@ impl IncompleteDwtExecutor<f32> for WasmWavelet2TapsF32 {
 }
 
 #[cfg(test)]
+#[allow(clippy::approx_constant)]
 mod tests {
     use super::*;
     use crate::{DaubechiesFamily, WaveletFilterProvider};

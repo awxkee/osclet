@@ -281,8 +281,8 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn test_load1_lane_zeroes_upper() {
-        let v = WasmVector::load1_lane(&3.14);
-        assert_f32x4_eq_v(v, [3.14, 0.0, 0.0, 0.0]);
+        let v = WasmVector::load1_lane(&3.25);
+        assert_f32x4_eq_v(v, [3.25, 0.0, 0.0, 0.0]);
     }
 
     #[wasm_bindgen_test]

@@ -221,8 +221,8 @@ impl DwtForwardExecutor<f32> for NeonWavelet16TapsF32 {
                 processed += 2;
             }
 
-            let approx = approx.chunks_exact_mut(2).into_remainder();
-            let details = details.chunks_exact_mut(2).into_remainder();
+            let approx = approx.as_chunks_mut::<2>().1;
+            let details = details.as_chunks_mut::<2>().1;
 
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
                 let base = 2 * (i + processed);
@@ -378,8 +378,8 @@ impl DwtInverseExecutor<f32> for NeonWavelet16TapsF32 {
 
                 while ui + 4 <= safe_end {
                     let (h, g) = (
-                        vld1q_f32(approx.get_unchecked(ui)),
-                        vld1q_f32(details.get_unchecked(ui)),
+                        vld1q_f32(approx.get_unchecked(ui..).as_ptr()),
+                        vld1q_f32(details.get_unchecked(ui..).as_ptr()),
                     );
 
                     let k = 2 * ui as isize - FILTER_OFFSET as isize;

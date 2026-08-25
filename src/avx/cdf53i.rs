@@ -332,14 +332,16 @@ where
 
         // Interleave even and odd
         for ((dst, &even), &odd) in output
-            .chunks_exact_mut(2)
+            .as_chunks_mut::<2>()
+            .0
+            .iter_mut()
             .zip(approx_inv.iter())
             .zip(odd_values.iter())
         {
             dst[0] = even;
             dst[1] = odd;
         }
-        let chunks = output.chunks_exact_mut(2).into_remainder();
+        let chunks = output.as_chunks_mut::<2>().1;
         if let Some(dst) = chunks.get_mut(0) {
             // Only one even value left at the end
             *dst = *approx_inv.last().unwrap();
@@ -395,7 +397,7 @@ mod tests {
             23, 255, 43, 23, 123, 54, 34, 255, 255, 23, 255, 32, 13, 15, 65, 23, 5, 7, 7, 3, 9,
         ];
 
-        let mut approx: Vec<i16> = vec![0; (o_signal.len() + 1) / 2];
+        let mut approx: Vec<i16> = vec![0; o_signal.len().div_ceil(2)];
         let mut details: Vec<i16> = vec![0; o_signal.len() / 2];
 
         let mut restored = vec![0i16; o_signal.len()];
@@ -421,7 +423,7 @@ mod tests {
             23, 255, 43, 23, 123, 54, 34, 255, 255, 23, 255, 32, 13, 15, 65, 23, 5, 7, 7, 3, 9, 1,
         ];
 
-        let mut approx: Vec<i16> = vec![0; (o_signal.len() + 1) / 2];
+        let mut approx: Vec<i16> = vec![0; o_signal.len().div_ceil(2)];
         let mut details: Vec<i16> = vec![0; o_signal.len() / 2];
 
         let mut restored = vec![0i16; o_signal.len()];
@@ -447,7 +449,7 @@ mod tests {
             255, 43, 23, 123, 54, 34, 255, 255, 23, 255, 32, 13, 15, 65, 23, 5, 7, 7, 3, 9, 1,
         ];
 
-        let mut approx: Vec<i16> = vec![0; (o_signal.len() + 1) / 2];
+        let mut approx: Vec<i16> = vec![0; o_signal.len().div_ceil(2)];
         let mut details: Vec<i16> = vec![0; o_signal.len() / 2];
 
         let mut restored = vec![0i16; o_signal.len()];

@@ -232,8 +232,8 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn test_load1_ref_zeroes_lane1() {
-        let v = WasmVectorD::load1_ref(&3.14);
-        assert_v_eq(v, [3.14, 0.0]);
+        let v = WasmVectorD::load1_ref(&3.25);
+        assert_v_eq(v, [3.25, 0.0]);
     }
 
     // ── store ──────────────────────────────────────────────────────────────────

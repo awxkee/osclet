@@ -203,8 +203,8 @@ impl AvxWaveletNTapsF32 {
                 processed += 4;
             }
 
-            let approx = approx.chunks_exact_mut(4).into_remainder();
-            let details = details.chunks_exact_mut(4).into_remainder();
+            let approx = approx.as_chunks_mut::<4>().1;
+            let details = details.as_chunks_mut::<4>().1;
             let padded_input = padded_input.get_unchecked(processed * 2..);
 
             processed = 0usize;
@@ -272,8 +272,8 @@ impl AvxWaveletNTapsF32 {
                 processed += 2;
             }
 
-            let approx = approx.chunks_exact_mut(2).into_remainder();
-            let details = details.chunks_exact_mut(2).into_remainder();
+            let approx = approx.as_chunks_mut::<2>().1;
+            let details = details.as_chunks_mut::<2>().1;
             let padded_input = padded_input.get_unchecked(processed * 2..);
 
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
@@ -284,9 +284,11 @@ impl AvxWaveletNTapsF32 {
                 let input = padded_input.get_unchecked(base..base + self.filter_length);
 
                 for ((src, g), h) in input
-                    .chunks_exact(16)
-                    .zip(self.high_pass.chunks_exact(16))
-                    .zip(self.low_pass.chunks_exact(16))
+                    .as_chunks::<16>()
+                    .0
+                    .iter()
+                    .zip(self.high_pass.as_chunks::<16>().0.iter())
+                    .zip(self.low_pass.as_chunks::<16>().0.iter())
                 {
                     let q0 = _mm256_loadu_ps(src.as_ptr());
                     let q2 = _mm256_loadu_ps(src.get_unchecked(8..).as_ptr());
@@ -301,14 +303,16 @@ impl AvxWaveletNTapsF32 {
                 let mut a = _mm_add_ps(_mm256_castps256_ps128(a), _mm256_extractf128_ps::<1>(a));
                 let mut d = _mm_add_ps(_mm256_castps256_ps128(d), _mm256_extractf128_ps::<1>(d));
 
-                let input = input.chunks_exact(16).remainder();
-                let high_pass = self.high_pass.chunks_exact(16).remainder();
-                let low_pass = self.low_pass.chunks_exact(16).remainder();
+                let input = input.as_chunks::<16>().1;
+                let high_pass = self.high_pass.as_chunks::<16>().1;
+                let low_pass = self.low_pass.as_chunks::<16>().1;
 
                 for ((src, g), h) in input
-                    .chunks_exact(4)
-                    .zip(high_pass.chunks_exact(4))
-                    .zip(low_pass.chunks_exact(4))
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(high_pass.as_chunks::<4>().0.iter())
+                    .zip(low_pass.as_chunks::<4>().0.iter())
                 {
                     let q0 = _mm_loadu_ps(src.as_ptr());
 
@@ -316,9 +320,9 @@ impl AvxWaveletNTapsF32 {
                     d = _mm_fmadd_ps(_mm_loadu_ps(g.as_ptr()), q0, d);
                 }
 
-                let input = input.chunks_exact(4).remainder();
-                let high_pass = high_pass.chunks_exact(4).remainder();
-                let low_pass = low_pass.chunks_exact(4).remainder();
+                let input = input.as_chunks::<4>().1;
+                let high_pass = high_pass.as_chunks::<4>().1;
+                let low_pass = low_pass.as_chunks::<4>().1;
 
                 let mut a = _mm_hsum_ps(a);
                 let mut d = _mm_hsum_ps(d);
@@ -413,9 +417,11 @@ impl AvxWaveletNTapsF32 {
 
                     for ((wg, wh), dst) in self
                         .high_pass
-                        .chunks_exact(16)
-                        .zip(self.low_pass.chunks_exact(16))
-                        .zip(part.chunks_exact_mut(16))
+                        .as_chunks::<16>()
+                        .0
+                        .iter()
+                        .zip(self.low_pass.as_chunks::<16>().0.iter())
+                        .zip(part.as_chunks_mut::<16>().0.iter_mut())
                     {
                         let xw0 = _mm256_loadu_ps(dst.as_ptr());
                         let xw2 = _mm256_loadu_ps(dst.get_unchecked(8..).as_ptr());
@@ -439,14 +445,16 @@ impl AvxWaveletNTapsF32 {
                         _mm256_storeu_ps(dst.get_unchecked_mut(8..).as_mut_ptr(), q2);
                     }
 
-                    let part = part.chunks_exact_mut(16).into_remainder();
-                    let high_pass = self.high_pass.chunks_exact(16).remainder();
-                    let low_pass = self.low_pass.chunks_exact(16).remainder();
+                    let part = part.as_chunks_mut::<16>().1;
+                    let high_pass = self.high_pass.as_chunks::<16>().1;
+                    let low_pass = self.low_pass.as_chunks::<16>().1;
 
                     for ((wg, wh), dst) in high_pass
-                        .chunks_exact(4)
-                        .zip(low_pass.chunks_exact(4))
-                        .zip(part.chunks_exact_mut(4))
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .zip(low_pass.as_chunks::<4>().0.iter())
+                        .zip(part.as_chunks_mut::<4>().0.iter_mut())
                     {
                         let xw0 = _mm_loadu_ps(dst.as_ptr());
                         let q0 = _mm_fmadd_ps(
@@ -457,9 +465,9 @@ impl AvxWaveletNTapsF32 {
                         _mm_storeu_ps(dst.as_mut_ptr(), q0);
                     }
 
-                    let part = part.chunks_exact_mut(4).into_remainder();
-                    let high_pass = self.high_pass.chunks_exact(4).remainder();
-                    let low_pass = self.low_pass.chunks_exact(4).remainder();
+                    let part = part.as_chunks_mut::<4>().1;
+                    let high_pass = self.high_pass.as_chunks::<4>().1;
+                    let low_pass = self.low_pass.as_chunks::<4>().1;
 
                     for ((&wg, &wh), dst) in
                         high_pass.iter().zip(low_pass.iter()).zip(part.iter_mut())
@@ -508,11 +516,7 @@ mod tests {
         ];
         let db4 = AvxWaveletNTapsF32::new(
             BorderMode::Wrap,
-            DaubechiesFamily::Db6
-                .get_wavelet()
-                .as_ref()
-                .try_into()
-                .unwrap(),
+            DaubechiesFamily::Db6.get_wavelet().as_ref(),
         );
         let out_length = dwt_length(input.len(), 12);
         let mut approx = vec![0.0; out_length];
@@ -590,11 +594,7 @@ mod tests {
         ];
         let db4 = AvxWaveletNTapsF32::new(
             BorderMode::Wrap,
-            DaubechiesFamily::Db6
-                .get_wavelet()
-                .as_ref()
-                .try_into()
-                .unwrap(),
+            DaubechiesFamily::Db6.get_wavelet().as_ref(),
         );
         let out_length = dwt_length(input.len(), 12);
         let mut approx = vec![0.0; out_length];

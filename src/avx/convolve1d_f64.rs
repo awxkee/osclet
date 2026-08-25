@@ -48,9 +48,9 @@ impl AvxConvolution1dF64 {
             let c2 = _mm256_permute4x64_pd::<{ shuffle(2, 2, 2, 2) }>(coeffs);
             let c3 = _mm256_permute4x64_pd::<{ shuffle(3, 3, 3, 3) }>(coeffs);
 
-            let mut p = output.chunks_exact_mut(8).len() * 8;
+            let mut p = output.as_chunks_mut::<8>().0.iter_mut().len() * 8;
 
-            for (x, dst) in output.chunks_exact_mut(8).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<8>().0.iter_mut().enumerate() {
                 let zx = x * 8;
                 let shifted_src = arena.get_unchecked(zx..);
 
@@ -81,9 +81,9 @@ impl AvxConvolution1dF64 {
                 _mm256_storeu_pd(dst.get_unchecked_mut(4..).as_mut_ptr(), k1);
             }
 
-            let output = output.chunks_exact_mut(8).into_remainder();
+            let output = output.as_chunks_mut::<8>().1;
 
-            for (x, dst) in output.chunks_exact_mut(4).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                 let zx = x * 4;
                 let shifted_src = arena.get_unchecked(p + zx..);
 
@@ -106,8 +106,8 @@ impl AvxConvolution1dF64 {
                 _mm256_storeu_pd(dst.as_mut_ptr(), k0);
             }
 
-            p += output.chunks_exact_mut(4).len() * 4;
-            let output = output.chunks_exact_mut(4).into_remainder();
+            p += output.as_chunks_mut::<4>().0.iter_mut().len() * 4;
+            let output = output.as_chunks_mut::<4>().1;
 
             for (x, dst) in output.iter_mut().enumerate() {
                 let shifted_src = arena.get_unchecked(p + x..);
@@ -138,9 +138,9 @@ impl AvxConvolution1dF64 {
             let c4 = _mm256_permute4x64_pd::<{ shuffle(0, 0, 0, 0) }>(coeffs2);
             let c5 = _mm256_permute4x64_pd::<{ shuffle(1, 1, 1, 1) }>(coeffs2);
 
-            let mut p = output.chunks_exact_mut(8).len() * 8;
+            let mut p = output.as_chunks_mut::<8>().0.iter_mut().len() * 8;
 
-            for (x, dst) in output.chunks_exact_mut(8).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<8>().0.iter_mut().enumerate() {
                 let zx = x * 8;
                 let shifted_src = arena.get_unchecked(zx..);
 
@@ -173,9 +173,9 @@ impl AvxConvolution1dF64 {
                 _mm256_storeu_pd(dst.get_unchecked_mut(4..).as_mut_ptr(), k1);
             }
 
-            let output = output.chunks_exact_mut(8).into_remainder();
+            let output = output.as_chunks_mut::<8>().1;
 
-            for (x, dst) in output.chunks_exact_mut(4).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                 let zx = x * 4;
                 let shifted_src = arena.get_unchecked(p + zx..);
 
@@ -200,8 +200,8 @@ impl AvxConvolution1dF64 {
                 _mm256_storeu_pd(dst.as_mut_ptr(), k0);
             }
 
-            p += output.chunks_exact_mut(4).len() * 4;
-            let output = output.chunks_exact_mut(4).into_remainder();
+            p += output.as_chunks_mut::<4>().0.iter_mut().len() * 4;
+            let output = output.as_chunks_mut::<4>().1;
 
             for (x, dst) in output.iter_mut().enumerate() {
                 let shifted_src = arena.get_unchecked(p + x..);
@@ -237,9 +237,9 @@ impl AvxConvolution1dF64 {
             let c6 = _mm256_permute4x64_pd::<{ shuffle(2, 2, 2, 2) }>(coeffs2);
             let c7 = _mm256_permute4x64_pd::<{ shuffle(3, 3, 3, 3) }>(coeffs2);
 
-            let mut p = output.chunks_exact_mut(8).len() * 8;
+            let mut p = output.as_chunks_mut::<8>().0.iter_mut().len() * 8;
 
-            for (x, dst) in output.chunks_exact_mut(8).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<8>().0.iter_mut().enumerate() {
                 let zx = x * 8;
                 let shifted_src = arena.get_unchecked(zx..);
 
@@ -274,9 +274,9 @@ impl AvxConvolution1dF64 {
                 _mm256_storeu_pd(dst.get_unchecked_mut(4..).as_mut_ptr(), k1);
             }
 
-            let output = output.chunks_exact_mut(8).into_remainder();
+            let output = output.as_chunks_mut::<8>().1;
 
-            for (x, dst) in output.chunks_exact_mut(4).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                 let zx = x * 4;
                 let shifted_src = arena.get_unchecked(p + zx..);
 
@@ -303,8 +303,8 @@ impl AvxConvolution1dF64 {
                 _mm256_storeu_pd(dst.as_mut_ptr(), k0);
             }
 
-            p += output.chunks_exact_mut(4).len() * 4;
-            let output = output.chunks_exact_mut(4).into_remainder();
+            p += output.as_chunks_mut::<4>().0.iter_mut().len() * 4;
+            let output = output.as_chunks_mut::<4>().1;
 
             for (x, dst) in output.iter_mut().enumerate() {
                 let shifted_src = arena.get_unchecked(p + x..);
@@ -406,9 +406,9 @@ impl AvxConvolution1dF64 {
         unsafe {
             let c0 = _mm256_set1_pd(*kernel.get_unchecked(0));
 
-            let mut p = output.chunks_exact_mut(8).len() * 8;
+            let mut p = output.as_chunks_mut::<8>().0.iter_mut().len() * 8;
 
-            for (x, dst) in output.chunks_exact_mut(8).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<8>().0.iter_mut().enumerate() {
                 let zx = x * 8;
                 let shifted_src = arena.get_unchecked(zx..);
 
@@ -434,9 +434,9 @@ impl AvxConvolution1dF64 {
                 _mm256_storeu_pd(dst.get_unchecked_mut(4..).as_mut_ptr(), k1);
             }
 
-            let output = output.chunks_exact_mut(8).into_remainder();
+            let output = output.as_chunks_mut::<8>().1;
 
-            for (x, dst) in output.chunks_exact_mut(4).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                 let zx = x * 4;
                 let shifted_src = arena.get_unchecked(p + zx..);
 
@@ -454,8 +454,8 @@ impl AvxConvolution1dF64 {
                 _mm256_storeu_pd(dst.as_mut_ptr(), k0);
             }
 
-            p += output.chunks_exact_mut(4).len() * 4;
-            let output = output.chunks_exact_mut(4).into_remainder();
+            p += output.as_chunks_mut::<4>().0.iter_mut().len() * 4;
+            let output = output.as_chunks_mut::<4>().1;
 
             for (x, dst) in output.iter_mut().enumerate() {
                 let shifted_src = arena.get_unchecked(p + x..);

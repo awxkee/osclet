@@ -905,9 +905,9 @@ impl Convolve1d<f32> for NeonConvolution1dF32 {
         unsafe {
             let c0 = vdupq_n_f32(*kernel.get_unchecked(0));
 
-            let mut p = output.chunks_exact_mut(16).len() * 16;
+            let mut p = output.as_chunks_mut::<16>().0.iter_mut().len() * 16;
 
-            for (x, dst) in output.chunks_exact_mut(16).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<16>().0.iter_mut().enumerate() {
                 let zx = x * 16;
                 let shifted_src = arena.get_unchecked(zx..);
 
@@ -981,9 +981,9 @@ impl Convolve1d<f32> for NeonConvolution1dF32 {
                 vst1q_f32(dst.get_unchecked_mut(12..).as_mut_ptr(), k3);
             }
 
-            let output = output.chunks_exact_mut(16).into_remainder();
+            let output = output.as_chunks_mut::<16>().1;
 
-            for (x, dst) in output.chunks_exact_mut(4).enumerate() {
+            for (x, dst) in output.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                 let zx = x * 4;
                 let shifted_src = arena.get_unchecked(p + zx..);
 
@@ -997,8 +997,8 @@ impl Convolve1d<f32> for NeonConvolution1dF32 {
                 vst1q_f32(dst.as_mut_ptr(), k);
             }
 
-            p += output.chunks_exact_mut(4).len() * 4;
-            let output = output.chunks_exact_mut(4).into_remainder();
+            p += output.as_chunks_mut::<4>().0.iter_mut().len() * 4;
+            let output = output.as_chunks_mut::<4>().1;
 
             let c0 = *kernel.get_unchecked(0);
 

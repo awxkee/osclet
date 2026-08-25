@@ -213,8 +213,8 @@ impl SseWavelet8TapsF64 {
                 processed += 4;
             }
 
-            let approx = approx.chunks_exact_mut(4).into_remainder();
-            let details = details.chunks_exact_mut(4).into_remainder();
+            let approx = approx.as_chunks_mut::<4>().1;
+            let details = details.as_chunks_mut::<4>().1;
 
             for (i, (approx, detail)) in approx.iter_mut().zip(details.iter_mut()).enumerate() {
                 let base = 2 * (i + processed);

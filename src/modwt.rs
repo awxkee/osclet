@@ -829,8 +829,7 @@ mod tests {
             );
         });
 
-        let inverse = handler.idwt(&result.to_ref(), 0);
-        println!("{:?}", inverse);
+        assert!(handler.idwt(&result.to_ref(), 0).is_ok());
     }
 
     #[test]

@@ -405,7 +405,7 @@ mod tests {
         .map(|&x| x as f32)
         .collect::<Vec<_>>();
 
-        let mut approx: Vec<f32> = vec![0.; (o_signal.len() + 1) / 2];
+        let mut approx: Vec<f32> = vec![0.; o_signal.len().div_ceil(2)];
         let mut details: Vec<f32> = vec![0.; o_signal.len() / 2];
 
         let mut restored = vec![0.; o_signal.len()];
@@ -435,7 +435,7 @@ mod tests {
         .map(|&x| x as f32)
         .collect::<Vec<_>>();
 
-        let mut approx: Vec<f32> = vec![0.; (o_signal.len() + 1) / 2];
+        let mut approx: Vec<f32> = vec![0.; o_signal.len().div_ceil(2)];
         let mut details: Vec<f32> = vec![0.; o_signal.len() / 2];
 
         let mut restored = vec![0.; o_signal.len()];
@@ -465,7 +465,7 @@ mod tests {
         .map(|&x| x as f32)
         .collect::<Vec<_>>();
 
-        let mut approx: Vec<f32> = vec![0.; (o_signal.len() + 1) / 2];
+        let mut approx: Vec<f32> = vec![0.; o_signal.len().div_ceil(2)];
         let mut details: Vec<f32> = vec![0.; o_signal.len() / 2];
 
         let mut restored = vec![0.; o_signal.len()];

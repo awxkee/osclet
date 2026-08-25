@@ -424,8 +424,8 @@ impl DwtInverseExecutor<f64> for NeonWavelet16TapsF64 {
 
                 while ui + 2 <= safe_end {
                     let (h, g) = (
-                        vld1q_f64(approx.get_unchecked(ui)),
-                        vld1q_f64(details.get_unchecked(ui)),
+                        vld1q_f64(approx.get_unchecked(ui..).as_ptr()),
+                        vld1q_f64(details.get_unchecked(ui..).as_ptr()),
                     );
                     let k = 2 * ui as isize - FILTER_OFFSET as isize;
                     let part = output.get_unchecked_mut(k as usize..);

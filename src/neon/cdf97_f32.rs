@@ -54,9 +54,11 @@ fn dwt97_forward_update_even(approx: &mut [f32], details: &[f32], c: f32) {
     let vc = unsafe { vdupq_n_f32(c) };
 
     for ((dst, detail), detail_next) in approx_k
-        .chunks_exact_mut(16)
-        .zip(details.chunks_exact(16))
-        .zip(details_next.chunks_exact(16))
+        .as_chunks_mut::<16>()
+        .0
+        .iter_mut()
+        .zip(details.as_chunks::<16>().0.iter())
+        .zip(details_next.as_chunks::<16>().0.iter())
     {
         unsafe {
             let d_left0 = vld1q_f32(detail.as_ptr());
@@ -95,9 +97,9 @@ fn dwt97_forward_update_even(approx: &mut [f32], details: &[f32], c: f32) {
         }
     }
 
-    let q_approx_k = approx_k.chunks_exact_mut(16).into_remainder();
-    let q_details = details.chunks_exact(16).remainder();
-    let q_details_next = details_next.chunks_exact(16).remainder();
+    let q_approx_k = approx_k.as_chunks_mut::<16>().1;
+    let q_details = details.as_chunks::<16>().1;
+    let q_details_next = details_next.as_chunks::<16>().1;
 
     for ((dst, detail), detail_next) in q_approx_k
         .iter_mut()
@@ -503,7 +505,7 @@ mod tests {
         .map(|&x| x as f32)
         .collect::<Vec<_>>();
 
-        let mut approx: Vec<f32> = vec![0.; (o_signal.len() + 1) / 2];
+        let mut approx: Vec<f32> = vec![0.; o_signal.len().div_ceil(2)];
         let mut details: Vec<f32> = vec![0.; o_signal.len() / 2];
 
         let mut restored = vec![0.; o_signal.len()];
@@ -531,7 +533,7 @@ mod tests {
         .map(|&x| x as f32)
         .collect::<Vec<_>>();
 
-        let mut approx: Vec<f32> = vec![0.; (o_signal.len() + 1) / 2];
+        let mut approx: Vec<f32> = vec![0.; o_signal.len().div_ceil(2)];
         let mut details: Vec<f32> = vec![0.; o_signal.len() / 2];
 
         let mut restored = vec![0.; o_signal.len()];
@@ -600,7 +602,7 @@ mod tests {
         .map(|&x| x as f32)
         .collect::<Vec<_>>();
 
-        let mut approx: Vec<f32> = vec![0.; (o_signal.len() + 1) / 2];
+        let mut approx: Vec<f32> = vec![0.; o_signal.len().div_ceil(2)];
         let mut details: Vec<f32> = vec![0.; o_signal.len() / 2];
 
         let mut restored = vec![0.; o_signal.len()];
@@ -636,7 +638,7 @@ mod tests {
         .map(|&x| x as f32)
         .collect::<Vec<_>>();
 
-        let mut approx: Vec<f32> = vec![0.; (o_signal.len() + 1) / 2];
+        let mut approx: Vec<f32> = vec![0.; o_signal.len().div_ceil(2)];
         let mut details: Vec<f32> = vec![0.; o_signal.len() / 2];
 
         let mut restored = vec![0.; o_signal.len()];
